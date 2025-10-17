@@ -1,0 +1,12 @@
+node_modules
+.pnpm-store
+.env
+.env.*
+.next
+out
+supabase/.env
+supabase/.temp
+package-lock.json
+yarn.lock
+.DS_Store
+coverage
