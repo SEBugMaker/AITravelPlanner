@@ -1,0 +1,21 @@
+version: "3.9"
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - ../../apps/web/.env.local
+    depends_on:
+      - supabase
+
+  supabase:
+    image: supabase/postgres:15.3.0.66
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: supabase
+      POSTGRES_DB: postgres
+    ports:
+      - "54322:5432"
