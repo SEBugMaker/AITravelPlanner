@@ -17,10 +17,11 @@ export async function recordExpense(input: ExpenseRecordInput) {
     return { ok: false, reason: "SUPABASE_NOT_CONFIGURED" } as const;
   }
 
+  const { occurredAt, ...rest } = input;
   const payload = {
-    ...input,
+    ...rest,
     currency: input.currency ?? "CNY",
-    occurred_at: input.occurredAt ?? new Date().toISOString(),
+    occurred_at: occurredAt ?? new Date().toISOString(),
     created_at: new Date().toISOString()
   };
 

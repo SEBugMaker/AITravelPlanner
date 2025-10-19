@@ -13,7 +13,49 @@ const requestSchema = z.object({
         summary: z.string(),
         highlights: z.array(z.string()),
         meals: z.array(z.string()).optional(),
-        estimatedCost: z.number().optional()
+        estimatedCost: z.number().optional(),
+        locations: z.array(
+          z.object({
+            name: z.string(),
+            latitude: z.number().optional(),
+            longitude: z.number().optional(),
+            address: z.string().optional()
+          })
+        ),
+        transportation: z.array(
+          z.object({
+            mode: z.string(),
+            origin: z.string().optional(),
+            destination: z.string().optional(),
+            departureTime: z.string().optional(),
+            arrivalTime: z.string().optional(),
+            duration: z.string().optional(),
+            detail: z.string().optional(),
+            costEstimate: z.number().optional()
+          })
+        ).optional(),
+        accommodation: z
+          .object({
+            name: z.string(),
+            address: z.string().optional(),
+            checkIn: z.string().optional(),
+            checkOut: z.string().optional(),
+            notes: z.string().optional(),
+            costEstimate: z.number().optional()
+          })
+          .nullable()
+          .optional(),
+        restaurants: z.array(
+          z.object({
+            name: z.string(),
+            cuisine: z.string().optional(),
+            mustTry: z.string().optional(),
+            address: z.string().optional(),
+            reservation: z.boolean().optional(),
+            budgetPerPerson: z.number().optional(),
+            time: z.string().optional()
+          })
+        ).optional()
       })
     )
   }),

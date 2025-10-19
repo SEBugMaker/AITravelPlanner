@@ -19,6 +19,15 @@ export interface GenerateItineraryResponse {
   itineraryId?: string | null;
 }
 
+export interface SaveItineraryOptions {
+  userId: string;
+  source?: string;
+}
+
+export interface SaveItineraryResult {
+  itineraryId: string | null;
+}
+
 export async function generateItinerary(
   preferences: TravelPreferences,
   options: GenerateItineraryOptions = {}
@@ -39,7 +48,7 @@ export async function generateItinerary(
   }
 
   if (options.persist) {
-    itineraryId = await persistItinerary(plan, preferences, options.userId ?? null);
+    itineraryId = await persistItinerary(plan, preferences, options.userId ?? null, "api");
   }
 
   return { plan, source, note, itineraryId };
@@ -58,7 +67,32 @@ function createFallbackPlan(preferences: TravelPreferences): ItineraryPlan {
     ...dayPlan,
     summary: `${preferences.destination} 经典线路第 ${dayPlan.day} 天`,
     highlights: [fallbackHighlights[idx % fallbackHighlights.length]],
-    meals: ["早餐：酒店自助", "午餐：特色餐厅", "晚餐：本地必吃"]
+    meals: ["早餐：酒店自助", "午餐：特色餐厅", "晚餐：本地必吃"],
+    locations: [
+      {
+        name: `${preferences.destination} 精选景点 ${idx + 1}`
+      }
+    ],
+    transportation: [
+      {
+        mode: "地面交通",
+        detail: "建议使用地铁或网约车往返各景点",
+        costEstimate: 120
+      }
+    ],
+    accommodation: {
+      name: `${preferences.destination} 舒适酒店`,
+      notes: "可替换为喜欢的酒店品牌",
+      costEstimate: 600
+    },
+    restaurants: [
+      {
+        name: `${preferences.destination} 人气餐厅`,
+        cuisine: "地方特色",
+        mustTry: "推荐尝试当地招牌菜",
+        budgetPerPerson: 150
+      }
+    ]
   }));
 
   return {
@@ -75,7 +109,13 @@ function normalizePlan(plan: ItineraryPlan, preferences: TravelPreferences): Iti
     summary: dayPlan.summary ?? `${preferences.destination} 行程第 ${index + 1} 天`,
     highlights: dayPlan.highlights?.length ? dayPlan.highlights : ["自由活动"],
     meals: dayPlan.meals ?? [],
-    estimatedCost: dayPlan.estimatedCost
+    estimatedCost: dayPlan.estimatedCost,
+    locations: Array.isArray(dayPlan.locations) && dayPlan.locations.length > 0
+      ? dayPlan.locations
+      : [],
+    transportation: Array.isArray(dayPlan.transportation) ? dayPlan.transportation : [],
+    accommodation: dayPlan.accommodation ?? null,
+    restaurants: Array.isArray(dayPlan.restaurants) ? dayPlan.restaurants : []
   }));
 
   return {
@@ -85,10 +125,20 @@ function normalizePlan(plan: ItineraryPlan, preferences: TravelPreferences): Iti
   };
 }
 
+export async function saveItinerary(
+  plan: ItineraryPlan,
+  preferences: TravelPreferences,
+  options: SaveItineraryOptions
+): Promise<SaveItineraryResult> {
+  const itineraryId = await persistItinerary(plan, preferences, options.userId, options.source ?? "manual");
+  return { itineraryId };
+}
+
 async function persistItinerary(
   plan: ItineraryPlan,
   preferences: TravelPreferences,
-  userId: string | null
+  userId: string | null,
+  source: string
 ): Promise<string | null> {
   const supabase = getSupabaseAdminClient();
   if (!supabase) {
@@ -100,7 +150,7 @@ async function persistItinerary(
     user_id: userId,
     plan,
     preferences,
-    source: "api",
+    source,
     created_at: new Date().toISOString()
   };
 

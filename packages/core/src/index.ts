@@ -12,12 +12,53 @@ export interface ItineraryDayPlan {
   highlights: string[];
   meals?: string[];
   estimatedCost?: number;
+  locations: DayLocation[];
+  transportation?: TransportationSegment[];
+  accommodation?: AccommodationPlan | null;
+  restaurants?: DiningRecommendation[];
 }
 
 export interface ItineraryPlan {
   overview: string;
   dayPlans: ItineraryDayPlan[];
   estimatedTotal: number;
+}
+
+export interface DayLocation {
+  name: string;
+  latitude?: number;
+  longitude?: number;
+  address?: string;
+}
+
+export interface TransportationSegment {
+  mode: string;
+  origin?: string;
+  destination?: string;
+  departureTime?: string;
+  arrivalTime?: string;
+  duration?: string;
+  detail?: string;
+  costEstimate?: number;
+}
+
+export interface AccommodationPlan {
+  name: string;
+  address?: string;
+  checkIn?: string;
+  checkOut?: string;
+  costEstimate?: number;
+  notes?: string;
+}
+
+export interface DiningRecommendation {
+  name: string;
+  cuisine?: string;
+  mustTry?: string;
+  address?: string;
+  reservation?: boolean;
+  budgetPerPerson?: number;
+  time?: string;
 }
 
 export function summarizePreferences(prefs: TravelPreferences): string {
@@ -33,7 +74,11 @@ export function createSkeletonPlan(prefs: TravelPreferences): ItineraryPlan {
       summary: "行程生成中……",
       highlights: ["即将由大模型补全"],
       meals: [],
-      estimatedCost: undefined
+      estimatedCost: undefined,
+      locations: [],
+      transportation: [],
+      accommodation: null,
+      restaurants: []
     })),
     estimatedTotal: prefs.budgetCNY
   };

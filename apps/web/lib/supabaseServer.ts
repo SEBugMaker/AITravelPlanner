@@ -1,7 +1,14 @@
 import { cookies } from "next/headers";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
-export function createSupabaseServerClient() {
+type SupabaseServerClientAccess = "read" | "write";
+
+interface SupabaseServerClientOptions {
+  access?: SupabaseServerClientAccess;
+}
+
+export function createSupabaseServerClient(options?: SupabaseServerClientOptions) {
+  const access: SupabaseServerClientAccess = options?.access ?? "read";
   const cookieStore = cookies();
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
@@ -12,6 +19,9 @@ export function createSupabaseServerClient() {
           return cookieStore.get(name)?.value;
         },
         set(name: string, value: string, options: CookieOptions) {
+          if (access !== "write") {
+            return;
+          }
           try {
             cookieStore.set({ name, value, ...options });
           } catch (error) {
@@ -19,6 +29,9 @@ export function createSupabaseServerClient() {
           }
         },
         remove(name: string, options: CookieOptions) {
+          if (access !== "write") {
+            return;
+          }
           try {
             cookieStore.delete({ name, ...options });
           } catch (error) {

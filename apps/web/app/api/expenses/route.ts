@@ -32,12 +32,17 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient({ access: "write" });
     const {
-      data: { session }
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: userError
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (userError) {
+      console.warn("[Expenses] Failed to verify user for POST", userError);
+    }
+
+    if (!user) {
       return NextResponse.json({
         error: "UNAUTHORIZED",
         message: "请先登录后再记录消费"
@@ -68,7 +73,7 @@ export async function POST(request: Request) {
       }, { status: 500 });
     }
 
-    if (!itineraryRow || itineraryRow.user_id !== session.user.id) {
+    if (!itineraryRow || itineraryRow.user_id !== user.id) {
       return NextResponse.json({
         error: "FORBIDDEN",
         message: "当前账号无权写入该行程消费"
@@ -78,7 +83,7 @@ export async function POST(request: Request) {
     const result = await recordExpense({
       itineraryId,
       ...payload,
-      userId: session.user.id
+      userId: user.id
     });
 
     if (!result.ok) {
@@ -111,12 +116,17 @@ export async function GET(request: Request) {
       }, { status: 400 });
     }
 
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient({ access: "write" });
     const {
-      data: { session }
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: userError
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (userError) {
+      console.warn("[Expenses] Failed to verify user for GET", userError);
+    }
+
+    if (!user) {
       return NextResponse.json({
         error: "UNAUTHORIZED",
         message: "请先登录后查看消费记录"
@@ -145,7 +155,7 @@ export async function GET(request: Request) {
       }, { status: 500 });
     }
 
-    if (!itineraryRow || itineraryRow.user_id !== session.user.id) {
+    if (!itineraryRow || itineraryRow.user_id !== user.id) {
       return NextResponse.json({
         error: "FORBIDDEN",
         message: "当前账号无权查看该行程消费"
@@ -156,7 +166,7 @@ export async function GET(request: Request) {
       .from("expense_records")
       .select("id, amount, currency, category, note, occurred_at, created_at")
       .eq("itineraryId", itineraryId)
-      .eq("userId", session.user.id)
+      .eq("userId", user.id)
       .order("occurred_at", { ascending: false });
 
     if (error) {
@@ -221,12 +231,17 @@ export async function DELETE(request: Request) {
       }, { status: 400 });
     }
 
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient({ access: "write" });
     const {
-      data: { session }
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: userError
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (userError) {
+      console.warn("[Expenses] Failed to verify user for DELETE", userError);
+    }
+
+    if (!user) {
       return NextResponse.json({
         error: "UNAUTHORIZED",
         message: "请先登录后再删除消费记录"
@@ -255,7 +270,7 @@ export async function DELETE(request: Request) {
       }, { status: 500 });
     }
 
-    if (!expenseRecord || expenseRecord.userId !== session.user.id) {
+    if (!expenseRecord || expenseRecord.userId !== user.id) {
       return NextResponse.json({
         error: "FORBIDDEN",
         message: "无权删除该消费记录"

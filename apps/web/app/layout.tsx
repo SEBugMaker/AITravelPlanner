@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { Inter } from "next/font/google";
-import "./globals.css";
 import { Providers } from "./providers";
 import { AppHeader } from "../components/layout/app-header";
 import { createSupabaseServerClient } from "../lib/supabaseServer";
+import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -15,16 +16,27 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const supabase = createSupabaseServerClient();
-  const {
-    data: { session }
-  } = await supabase.auth.getSession();
+  const [sessionResult, userResult] = await Promise.all([
+    supabase.auth.getSession(),
+    supabase.auth.getUser()
+  ]);
+
+  const session = sessionResult.data.session ?? null;
+  const verifiedUser = userResult.data.user ?? null;
+
+  const sanitizedSession: Session | null = session && verifiedUser
+    ? ({
+        ...session,
+        user: verifiedUser
+      } as Session)
+    : session;
 
   return (
     <html lang="zh-CN">
       <body className={`${inter.className} min-h-screen bg-gradient-to-b from-slate-100 to-slate-200`}>
-        <Providers initialSession={session ?? null}>
+        <Providers initialSession={sanitizedSession}>
           <AppHeader />
-          <main className="min-h-screen pt-24">
+          <main className="min-h-screen pt-4">
             {children}
           </main>
         </Providers>

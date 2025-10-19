@@ -5,11 +5,15 @@ import { useSessionContext } from "@supabase/auth-helpers-react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import type { ItineraryPlan, TravelPreferences } from "@core/index";
+import { estimateBudget, type BudgetItem } from "../../lib/services/budget";
+import {
+  defaultTravelPreferences,
+  parsePreferencesFromText,
+  quickInterests
+} from "../../lib/services/preferences";
 import { useSpeechRecognition } from "../../hooks/useSpeechRecognition";
 import { PlannerMap } from "./planner-map";
 import { PlannerWeather } from "./planner-weather";
-
-const quickInterests = ["美食", "自然", "文化", "亲子", "冒险", "购物", "放松", "夜生活"];
 
 interface PlannerFormState extends TravelPreferences {
   persist: boolean;
@@ -41,141 +45,9 @@ interface LocationInfo {
 }
 
 const defaultFormState: PlannerFormState = {
-  destination: "",
-  days: 3,
-  budgetCNY: 5000,
-  companions: 2,
-  interests: ["美食"],
+  ...defaultTravelPreferences,
   persist: false
 };
-
-const chineseDigitMap: Record<string, number> = {
-  零: 0,
-  一: 1,
-  二: 2,
-  两: 2,
-  三: 3,
-  四: 4,
-  五: 5,
-  六: 6,
-  七: 7,
-  八: 8,
-  九: 9
-};
-
-const chineseUnitMap: Record<string, number> = {
-  十: 10,
-  百: 100,
-  千: 1000,
-  万: 10000
-};
-
-function parseChineseNumber(text: string): number | null {
-  let total = 0;
-  let section = 0;
-  let current = 0;
-  let hasValue = false;
-
-  for (const char of text) {
-    if (char in chineseDigitMap) {
-      current = chineseDigitMap[char];
-      hasValue = true;
-    } else if (char in chineseUnitMap) {
-      const unit = chineseUnitMap[char];
-      if (unit === 10000) {
-        section = (section + (current || 0)) * unit;
-        total += section;
-        section = 0;
-      } else {
-        section += (current || 1) * unit;
-      }
-      current = 0;
-      hasValue = true;
-    }
-  }
-
-  const result = total + section + current;
-  return hasValue ? result : null;
-}
-
-function parseNumericToken(token: string): number | null {
-  if (!token) return null;
-
-  const numericMatch = token.match(/\d+(?:\.\d+)?/);
-  if (numericMatch) {
-    const value = Number.parseFloat(numericMatch[0]);
-    if (Number.isFinite(value)) {
-      return value;
-    }
-  }
-
-  const cleaned = token.replace(/[约大概差不多左右上下\s]/g, "");
-  return parseChineseNumber(cleaned);
-}
-
-function applyUnitMultiplier(value: number | null, unit: string | undefined): number | null {
-  if (value == null || !Number.isFinite(value)) return null;
-  if (!unit) return value;
-
-  const map: Record<string, number> = {
-    十: 10,
-    百: 100,
-    千: 1000,
-    万: 10000
-  };
-
-  return map[unit] ? value * map[unit] : value;
-}
-
-function parsePreferencesFromText(text: string): Partial<TravelPreferences> {
-  const normalized = text.replace(/\s+/g, "");
-  const result: Partial<TravelPreferences> = {};
-
-  const destinationMatch = normalized.match(/(?:去|到|前往|想去)([\u4e00-\u9fa5A-Za-z\d]{2,})/);
-  if (destinationMatch?.[1]) {
-    result.destination = destinationMatch[1].replace(/(旅游|旅行|玩|看看)$/u, "");
-  }
-
-  const dayMatch = normalized.match(/([零一二两三四五六七八九十百千万\d\.]+)天/);
-  const parsedDays = parseNumericToken(dayMatch?.[1] ?? "");
-  if (parsedDays && parsedDays > 0) {
-    result.days = Math.min(30, Math.max(1, Math.round(parsedDays)));
-  }
-
-  const budgetMatch = normalized.match(/预算(?:大概|大约|约)?([零一二两三四五六七八九十百千万\d\.]+)(万|千|百)?(?:元|块|人民币|rmb|cny)?/i);
-  const parsedBudget = applyUnitMultiplier(parseNumericToken(budgetMatch?.[1] ?? ""), budgetMatch?.[2]);
-  if (parsedBudget != null) {
-    result.budgetCNY = Math.max(0, Math.round(parsedBudget));
-  }
-
-  const companionMatch = normalized.match(/([零一二两三四五六七八九十百千万\d\.]+)(?:位|人|名)(?:同行|一起|出行)?/);
-  const parsedCompanions = parseNumericToken(companionMatch?.[1] ?? "");
-  if (parsedCompanions && parsedCompanions > 0) {
-    result.companions = Math.min(10, Math.max(1, Math.round(parsedCompanions)));
-  }
-
-  const interestSet = new Set<string>();
-  for (const interest of quickInterests) {
-    if (normalized.includes(interest)) {
-      interestSet.add(interest);
-    }
-  }
-
-  const interestSegmentMatch = normalized.match(/喜欢([^。！!?？；;]+)/);
-  if (interestSegmentMatch?.[1]) {
-    interestSegmentMatch[1]
-      .split(/[、,，\/]/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .forEach((item) => interestSet.add(item));
-  }
-
-  if (interestSet.size > 0) {
-    result.interests = Array.from(interestSet).slice(0, 10);
-  }
-
-  return result;
-}
 
 function formatSpeechStatus(
   supported: boolean,
@@ -202,6 +74,61 @@ function formatSpeechStatus(
   return { label: "待开始录音", color: "text-slate-400" };
 }
 
+const expenseCategories: BudgetItem["category"][] = ["transport", "accommodation", "dining", "activities", "buffer"];
+
+const budgetCategoryLabels: Record<BudgetItem["category"], string> = {
+  transport: "交通",
+  accommodation: "住宿",
+  dining: "餐饮",
+  activities: "活动",
+  buffer: "机动"
+};
+
+interface ExpenseDraft {
+  amount: string;
+  category: BudgetItem["category"];
+  note: string;
+}
+
+interface ExpenseRecord {
+  id: string;
+  amount: number;
+  category: BudgetItem["category"];
+  note: string;
+  createdAt: string;
+  occurredAt: string;
+  currency: string;
+  origin: "local" | "remote";
+}
+
+function formatCurrency(value: number | null | undefined, fractionDigits = 0): string {
+  if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
+    return "¥0";
+  }
+  const safeValue = Number(value);
+  return `¥${safeValue.toLocaleString("zh-CN", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits
+  })}`;
+}
+
+function pickSegmentColor(ratio: number): string {
+  if (Number.isNaN(ratio) || ratio <= 0.6) {
+    return "bg-sky-500";
+  }
+  if (ratio <= 0.9) {
+    return "bg-amber-500";
+  }
+  return "bg-rose-500";
+}
+
+function generateExpenseId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2, 11);
+}
+
 export function PlannerShell(): JSX.Element {
   const { session } = useSessionContext();
   const router = useRouter();
@@ -210,8 +137,11 @@ export function PlannerShell(): JSX.Element {
   const [interestInput, setInterestInput] = useState("");
   const [plan, setPlan] = useState<ItineraryPlan | null>(null);
   const [planSource, setPlanSource] = useState<string | null>(null);
+  const [currentItineraryId, setCurrentItineraryId] = useState<string | null>(null);
   const [activeDayIndex, setActiveDayIndex] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isTranscriptGenerating, setIsTranscriptGenerating] = useState(false);
+  const [isSavingItinerary, setIsSavingItinerary] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
 
@@ -224,8 +154,15 @@ export function PlannerShell(): JSX.Element {
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
+  const [expenseDraft, setExpenseDraft] = useState<ExpenseDraft>({ amount: "", category: "transport", note: "" });
+  const [expenseError, setExpenseError] = useState<string | null>(null);
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [expensesLoading, setExpensesLoading] = useState(false);
+  const [expenseSubmitting, setExpenseSubmitting] = useState(false);
+
   const savedControllerRef = useRef<AbortController | null>(null);
   const locationControllerRef = useRef<AbortController | null>(null);
+  const expenseControllerRef = useRef<AbortController | null>(null);
 
   const {
     supported,
@@ -242,6 +179,7 @@ export function PlannerShell(): JSX.Element {
     return () => {
       savedControllerRef.current?.abort();
       locationControllerRef.current?.abort();
+      expenseControllerRef.current?.abort();
     };
   }, []);
 
@@ -353,6 +291,89 @@ export function PlannerShell(): JSX.Element {
     }
   }, []);
 
+  const fetchExpensesForItinerary = useCallback(async (itineraryId: string) => {
+    const normalized = itineraryId.trim();
+    if (!normalized) {
+      setExpenses([]);
+      return;
+    }
+
+    expenseControllerRef.current?.abort();
+    const controller = new AbortController();
+    expenseControllerRef.current = controller;
+
+    setExpensesLoading(true);
+    setExpenseError(null);
+
+    try {
+      const response = await fetch(`/api/expenses?itineraryId=${encodeURIComponent(normalized)}`, {
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal
+      });
+
+      if (response.status === 401) {
+        setExpenses([]);
+        setExpenseError("登录后即可查看消费记录");
+        return;
+      }
+
+      if (response.status === 403) {
+        setExpenses([]);
+        setExpenseError("暂无权访问该行程的消费记录");
+        return;
+      }
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload) {
+        const reason = payload?.message ?? "获取消费记录失败";
+        throw new Error(reason);
+      }
+
+      const items = Array.isArray(payload.expenses) ? payload.expenses : [];
+      const mapped: ExpenseRecord[] = items
+        .map((item: any) => {
+          const categoryCandidate = String(item.category ?? "");
+          const safeCategory = expenseCategories.includes(categoryCandidate as BudgetItem["category"])
+            ? (categoryCandidate as BudgetItem["category"])
+            : "activities";
+
+          const amount = Number(item.amount ?? 0);
+          if (!Number.isFinite(amount) || amount < 0) {
+            return null;
+          }
+
+          const occurredAt = String(item.occurredAt ?? item.occurred_at ?? item.createdAt ?? item.created_at ?? new Date().toISOString());
+          const createdAt = String(item.createdAt ?? item.created_at ?? occurredAt);
+
+          return {
+            id: String(item.id ?? generateExpenseId()),
+            amount,
+            category: safeCategory,
+            note: typeof item.note === "string" ? item.note : "",
+            currency: typeof item.currency === "string" && item.currency.trim() ? item.currency : "CNY",
+            occurredAt,
+            createdAt,
+            origin: "remote"
+          } as ExpenseRecord;
+        })
+  .filter((entry: ExpenseRecord | null): entry is ExpenseRecord => entry !== null);
+
+      setExpenses(mapped);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      setExpenseError(error instanceof Error ? error.message : "获取消费记录失败");
+      setExpenses([]);
+    } finally {
+      if (expenseControllerRef.current === controller) {
+        expenseControllerRef.current = null;
+      }
+      setExpensesLoading(false);
+    }
+  }, []);
+
   const openSavedDrawer = useCallback(() => {
     if (!session) {
       setSavedItineraries([]);
@@ -430,6 +451,93 @@ export function PlannerShell(): JSX.Element {
     resetTranscript();
   }, [transcript, applyContentToPreferences, resetTranscript]);
 
+  const submitTranscriptToAI = useCallback(async () => {
+    const content = transcript.trim();
+    if (!content) {
+      setFormError("请先录入语音内容。");
+      return;
+    }
+
+    const shouldPersist = formState.persist && Boolean(session);
+
+    setFormError(null);
+    setFormSuccess(null);
+    setIsTranscriptGenerating(true);
+    try {
+      const response = await fetch("/api/itineraries/from-transcript", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: content, persist: shouldPersist })
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (response.status === 401) {
+        setFormError(payload?.message ?? "请先登录后再使用云端生成功能。");
+        return;
+      }
+
+      if (response.status === 422) {
+        const parsed = payload?.parsedPreferences ?? {};
+        setFormState((prev) => ({
+          ...prev,
+          ...parsed,
+          persist: prev.persist
+        }));
+        setFormError(payload?.message ?? "语音内容缺少关键信息，请确认后再试。");
+        return;
+      }
+
+      if (!response.ok || !payload) {
+        const message = payload?.message ?? "语音行程生成失败";
+        throw new Error(message);
+      }
+
+      const itinerary = payload as {
+        plan: ItineraryPlan;
+        source?: string | null;
+        note?: string | null;
+        itineraryId?: string | null;
+        preferences: TravelPreferences;
+        usedFallback?: boolean;
+      };
+
+      if (!itinerary.plan || !itinerary.preferences) {
+        throw new Error("语音行程生成失败，返回数据不完整");
+      }
+
+      setPlan(itinerary.plan);
+      setPlanSource(itinerary.source ?? "语音生成");
+      setCurrentItineraryId(itinerary.itineraryId ?? null);
+      setExpenses([]);
+      setExpenseError(null);
+      setActiveDayIndex(0);
+      setFormState((prev) => ({
+        ...prev,
+        ...itinerary.preferences,
+        persist: shouldPersist
+      }));
+      setFormSuccess(itinerary.usedFallback ? "行程已生成，部分字段采用默认值，可继续调整。" : "语音行程生成完成！");
+      void fetchLocationInfo(itinerary.preferences.destination);
+      if (shouldPersist) {
+        void refreshSavedItineraries();
+      }
+      resetTranscript();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "语音行程生成失败");
+    } finally {
+      setIsTranscriptGenerating(false);
+    }
+  }, [
+    transcript,
+    formState.persist,
+    session,
+    fetchLocationInfo,
+    refreshSavedItineraries,
+    resetTranscript,
+    setFormState
+  ]);
+
   const loadSavedItinerary = useCallback(
     (record: SavedItineraryRecord) => {
       if (!record.plan || !record.preferences?.destination) {
@@ -444,8 +552,11 @@ export function PlannerShell(): JSX.Element {
       }));
       setPlan(record.plan);
       setPlanSource(record.source ?? "云端行程");
+      setCurrentItineraryId(record.id ?? null);
+      setExpenses([]);
       setActiveDayIndex(0);
       setFormSuccess("已载入云端行程，可继续查看或修改。");
+  setExpenseError(null);
       void fetchLocationInfo(record.preferences.destination);
       closeSavedDrawer();
     },
@@ -490,6 +601,162 @@ export function PlannerShell(): JSX.Element {
       interests: prev.interests.filter((item) => item !== interest)
     }));
   }, []);
+
+  const handleExpenseFieldChange = useCallback(<Key extends keyof ExpenseDraft>(key: Key, value: string) => {
+    setExpenseDraft((prev) => ({
+      ...prev,
+      [key]: value
+    }));
+  }, []);
+
+  const addExpense = useCallback(async () => {
+    setExpenseError(null);
+    const normalizedAmount = Number.parseFloat(expenseDraft.amount);
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      setExpenseError("请输入有效的金额");
+      return;
+    }
+
+    const amountValue = Number(normalizedAmount.toFixed(2));
+    const noteValue = expenseDraft.note.trim();
+
+    const appendLocal = (message: string | null) => {
+      const timestamp = new Date().toISOString();
+      const record: ExpenseRecord = {
+        id: generateExpenseId(),
+        amount: amountValue,
+        category: expenseDraft.category,
+        note: noteValue,
+        createdAt: timestamp,
+        occurredAt: timestamp,
+        currency: "CNY",
+        origin: "local"
+      };
+
+      setExpenses((prev) => [record, ...prev]);
+      setExpenseDraft((prev) => ({ amount: "", category: prev.category, note: "" }));
+      if (message) {
+        setExpenseError(message);
+      }
+    };
+
+    if (!session) {
+      appendLocal("未登录，仅在本地保存。登录并保存行程后可同步到云端。");
+      return;
+    }
+
+    if (!currentItineraryId) {
+      appendLocal("行程未保存到云端，此消费仅保存在本地。");
+      return;
+    }
+
+    setExpenseSubmitting(true);
+    try {
+      const response = await fetch("/api/expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itineraryId: currentItineraryId,
+          amount: amountValue,
+          category: expenseDraft.category,
+          note: noteValue || undefined,
+          occurredAt: new Date().toISOString()
+        })
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = payload?.message ?? "记录消费失败";
+        throw new Error(message);
+      }
+
+      setExpenseDraft((prev) => ({ amount: "", category: prev.category, note: "" }));
+      await fetchExpensesForItinerary(currentItineraryId);
+    } catch (error) {
+      setExpenseError(error instanceof Error ? error.message : "记录消费失败");
+    } finally {
+      setExpenseSubmitting(false);
+    }
+  }, [expenseDraft, session, currentItineraryId, fetchExpensesForItinerary]);
+
+  const removeExpense = useCallback(
+    async (record: ExpenseRecord) => {
+      setExpenseError(null);
+
+      if (record.origin === "remote" && session && currentItineraryId) {
+        try {
+          const response = await fetch("/api/expenses", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: record.id })
+          });
+
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            const message = payload?.message ?? "删除消费记录失败";
+            throw new Error(message);
+          }
+
+          await fetchExpensesForItinerary(currentItineraryId);
+        } catch (error) {
+          setExpenseError(error instanceof Error ? error.message : "删除消费记录失败");
+        }
+        return;
+      }
+
+      setExpenses((prev) => prev.filter((expense) => expense.id !== record.id));
+    },
+    [session, currentItineraryId, fetchExpensesForItinerary]
+  );
+
+  const saveItineraryManually = useCallback(async () => {
+    if (!plan) {
+      setFormError("当前没有可保存的行程。");
+      return;
+    }
+
+    if (!session) {
+      setFormError("请先登录后再保存到云端。");
+      router.push("/auth/login");
+      return;
+    }
+
+    setIsSavingItinerary(true);
+    setFormError(null);
+    setFormSuccess(null);
+
+    const { persist: _persist, ...preferences } = formState;
+
+    try {
+      const response = await fetch("/api/itineraries/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan,
+          preferences,
+          itineraryId: currentItineraryId ?? undefined
+        })
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload) {
+        const message = payload?.message ?? "保存云端行程失败";
+        throw new Error(message);
+      }
+
+      if (payload.itineraryId) {
+        setCurrentItineraryId(String(payload.itineraryId));
+      }
+
+      const actionLabel = payload.action === "updated" ? "云端行程已更新。" : "云端行程已保存。";
+      setFormSuccess(actionLabel);
+      void refreshSavedItineraries();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "保存云端行程失败");
+    } finally {
+      setIsSavingItinerary(false);
+    }
+  }, [plan, session, router, formState, currentItineraryId, refreshSavedItineraries]);
 
   const handlePersistToggle = useCallback(
     (checked: boolean) => {
@@ -540,9 +807,12 @@ export function PlannerShell(): JSX.Element {
           throw new Error(message);
         }
 
-        const itinerary = payload as { plan: ItineraryPlan; source?: string | null };
-        setPlan(itinerary.plan);
-        setPlanSource(itinerary.source ?? null);
+  const itinerary = payload as { plan: ItineraryPlan; source?: string | null; itineraryId?: string | null };
+  setPlan(itinerary.plan);
+  setPlanSource(itinerary.source ?? null);
+  setCurrentItineraryId(itinerary.itineraryId ?? null);
+        setExpenses([]);
+        setExpenseError(null);
         setActiveDayIndex(0);
         setFormSuccess("行程生成完成！");
         void fetchLocationInfo(preferences.destination);
@@ -577,6 +847,44 @@ export function PlannerShell(): JSX.Element {
     }
   }, [plan, activeDayIndex]);
 
+  useEffect(() => {
+    if (!currentItineraryId) {
+      return;
+    }
+
+    if (!session) {
+      setExpenses([]);
+      return;
+    }
+
+    void fetchExpensesForItinerary(currentItineraryId);
+  }, [currentItineraryId, session, fetchExpensesForItinerary]);
+
+  const budgetSummary = useMemo(() => {
+    if (!plan) {
+      return null;
+    }
+    return estimateBudget(plan, formState);
+  }, [plan, formState]);
+
+  const totalExpense = useMemo(() => {
+    return expenses.reduce((sum, item) => sum + item.amount, 0);
+  }, [expenses]);
+
+  const spentByBudgetCategory = useMemo(() => {
+    const map = new Map<BudgetItem["category"], number>();
+    for (const expense of expenses) {
+      map.set(expense.category, Number((map.get(expense.category) ?? 0) + expense.amount));
+    }
+    return map;
+  }, [expenses]);
+
+  const remainingBudget = useMemo(() => {
+    const base = budgetSummary?.total ?? formState.budgetCNY;
+    const diff = base - totalExpense;
+    return diff > 0 ? diff : 0;
+  }, [budgetSummary, formState.budgetCNY, totalExpense]);
+
   const dayCountLabel = useMemo(() => {
     if (!plan) {
       return `${formState.days} 天`;
@@ -594,13 +902,16 @@ export function PlannerShell(): JSX.Element {
   const clearPlan = useCallback(() => {
     setPlan(null);
     setPlanSource(null);
+    setCurrentItineraryId(null);
+    setExpenses([]);
     setActiveDayIndex(0);
+    setExpenseError(null);
   }, []);
 
   return (
     <Fragment>
-      <div className="px-4 py-10 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-6xl flex-col gap-8">
+  <div className="px-3 pt-3 pb-10 sm:px-5 sm:pt-6 lg:px-6 xl:px-8">
+        <div className="mx-auto flex max-w-7xl flex-col gap-6">
           <header className="rounded-3xl bg-white/80 p-8 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -619,8 +930,79 @@ export function PlannerShell(): JSX.Element {
             </div>
           </header>
 
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,380px)_1fr]">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,300px)_minmax(0,1.35fr)_minmax(0,320px)] xl:grid-cols-[minmax(0,310px)_minmax(0,1.4fr)_minmax(0,340px)]">
             <section className="space-y-6">
+              <article className="space-y-3 rounded-3xl border border-slate-200 bg-white/70 p-5 shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-base font-semibold text-slate-900">语音速记</h3>
+                    <p className="text-xs text-slate-500">通过语音快速补充偏好，可自动解析目的地、预算、天数、同行人数与兴趣标签。</p>
+                  </div>
+                  <span className={clsx("text-xs", speechStatus.color)}>{speechStatus.label}</span>
+                </div>
+
+                {!supported ? (
+                  <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-500">当前浏览器不支持麦克风录音或权限受限。</p>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (processing) return;
+                          return listening ? stopListening() : startListening();
+                        }}
+                        disabled={processing}
+                        className={clsx(
+                          "flex-1 rounded-xl px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-70",
+                          processing
+                            ? "bg-slate-500"
+                            : listening
+                              ? "bg-rose-500 hover:bg-rose-400"
+                              : "bg-slate-900 hover:bg-slate-800"
+                        )}
+                      >
+                        {processing ? "识别中…" : listening ? "正在录音…点击停止" : "开始语音输入"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetTranscript}
+                        disabled={processing || listening}
+                        className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        清空
+                      </button>
+                    </div>
+                    {speechError ? <p className="text-xs text-rose-500">{speechError}</p> : null}
+                    <textarea
+                      value={transcript}
+                      readOnly
+                      rows={4}
+                      placeholder="语音内容会在此显示，可点击下方按钮解析并填充偏好"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 focus:outline-none"
+                    />
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <button
+                        type="button"
+                        disabled={!transcript || processing || isTranscriptGenerating}
+                        onClick={adoptTranscript}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {transcript ? "解析语音内容并填充偏好" : processing ? "识别中" : "等待语音内容"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!transcript || processing || isTranscriptGenerating || isGenerating}
+                        onClick={() => void submitTranscriptToAI()}
+                        className="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {isTranscriptGenerating ? "语音生成中…" : "直接生成行程"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </article>
+
               <form onSubmit={handleSubmit} className="space-y-6 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-semibold text-slate-900">旅行偏好</h2>
@@ -748,96 +1130,50 @@ export function PlannerShell(): JSX.Element {
 
                 <button
                   type="submit"
-                  disabled={isGenerating}
+                  disabled={isGenerating || isTranscriptGenerating}
                   className="w-full rounded-2xl bg-gradient-to-r from-slate-900 to-slate-700 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isGenerating ? "正在生成行程…" : "生成智能行程"}
+                  {isGenerating ? "正在生成行程…" : isTranscriptGenerating ? "语音生成中…" : "生成智能行程"}
                 </button>
 
                 {formError ? <p className="text-xs text-rose-500">{formError}</p> : null}
                 {formSuccess ? <p className="text-xs text-emerald-600">{formSuccess}</p> : null}
               </form>
 
-              <section className="space-y-3 rounded-3xl border border-slate-200 bg-white/70 p-5 shadow-sm">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="text-base font-semibold text-slate-900">语音速记</h3>
-                    <p className="text-xs text-slate-500">通过语音快速补充偏好，可自动解析目的地、预算、天数、同行人数与兴趣标签。</p>
-                  </div>
-                  <span className={clsx("text-xs", speechStatus.color)}>{speechStatus.label}</span>
-                </div>
-
-                {!supported ? (
-                  <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-500">当前浏览器不支持麦克风录音或权限受限。</p>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (processing) return;
-                          return listening ? stopListening() : startListening();
-                        }}
-                        disabled={processing}
-                        className={clsx(
-                          "flex-1 rounded-xl px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-70",
-                          processing
-                            ? "bg-slate-500"
-                            : listening
-                              ? "bg-rose-500 hover:bg-rose-400"
-                              : "bg-slate-900 hover:bg-slate-800"
-                        )}
-                      >
-                        {processing ? "识别中…" : listening ? "正在录音…点击停止" : "开始语音输入"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={resetTranscript}
-                        disabled={processing || listening}
-                        className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        清空
-                      </button>
-                    </div>
-                    {speechError ? <p className="text-xs text-rose-500">{speechError}</p> : null}
-                    <textarea
-                      value={transcript}
-                      readOnly
-                      rows={4}
-                      placeholder="语音内容会在此显示，可点击下方按钮解析并填充偏好"
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      disabled={!transcript || processing}
-                      onClick={adoptTranscript}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {transcript ? "解析语音内容并填充偏好" : processing ? "识别中" : "等待语音内容"}
-                    </button>
-                  </div>
-                )}
-              </section>
             </section>
 
-            <section className="space-y-6">
-              <article className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+            <section className="flex flex-col gap-6">
+              <article className="flex flex-1 flex-col rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
                   <div>
                     <h2 className="text-lg font-semibold text-slate-900">行程概览</h2>
-                    <p className="text-xs text-slate-500">模型生成的每日安排、交通与餐饮推荐</p>
+                    <p className="text-xs text-slate-500">
+                      查看 AI 自动汇总的行程结构，涵盖每日亮点、交通建议、餐饮推荐与住宿提示，便于快速核对整体节奏。
+                    </p>
                   </div>
-                  {planSource ? (
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">来源：{planSource}</span>
-                  ) : null}
+                  <div className="flex items-center gap-2">
+                    {planSource ? (
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">来源：{planSource}</span>
+                    ) : null}
+                    {plan ? (
+                      <button
+                        type="button"
+                        onClick={() => void saveItineraryManually()}
+                        disabled={isSavingItinerary}
+                        className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isSavingItinerary ? "保存中…" : currentItineraryId ? "更新云端行程" : "保存到云端"}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
 
                 {plan ? (
-                  <div className="mt-4 space-y-4">
+                  <div className="flex flex-1 flex-col gap-4">
                     <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">{plan.overview}</p>
 
                     {plan.dayPlans.length > 0 ? (
-                      <div className="space-y-4">
+                      <div className="flex flex-1 flex-col gap-4">
                         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                           <p className="text-xs text-slate-500">
                             {selectedDayPlan ? `当前查看第 ${selectedDayPlan.day} 天行程` : "等待行程数据…"}
@@ -864,7 +1200,7 @@ export function PlannerShell(): JSX.Element {
                         </div>
 
                         {selectedDayPlan ? (
-                          <div className="space-y-4 rounded-2xl border border-slate-200 bg-white/70 p-5">
+                          <div className="flex flex-1 flex-col gap-4 rounded-2xl border border-slate-200 bg-white/70 p-5">
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <p className="text-sm font-semibold text-slate-500">第 {selectedDayPlan.day} 天</p>
@@ -981,13 +1317,16 @@ export function PlannerShell(): JSX.Element {
                     ) : null}
                   </div>
                 ) : (
-                  <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-10 text-center text-sm text-slate-500">
-                    暂未生成行程。提交偏好后将在此展示完整行程安排。
+                  <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-10 text-center text-sm text-slate-500">
+                    生成行程后，这里会展示每日节点、交通方式与餐饮推荐，帮助你快速预览整体旅程结构。
                   </div>
                 )}
               </article>
 
-              <article className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+            </section>
+
+            <section className="space-y-6">
+              <article className="flex flex-col rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold text-slate-900">目的地地图与天气</h2>
@@ -1004,7 +1343,7 @@ export function PlannerShell(): JSX.Element {
                 </div>
 
                 {plan ? (
-                  <div className="mt-4 space-y-4">
+                  <div className="mt-4 flex flex-1 flex-col gap-4">
                     <PlannerMap
                       destination={formState.destination ? formState.destination : null}
                       baseLocation={locationInfo.location ? {
@@ -1032,10 +1371,179 @@ export function PlannerShell(): JSX.Element {
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-8 text-center text-sm text-slate-500">
+                  <div className="mt-6 flex flex-1 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-8 text-center text-sm text-slate-500">
                     生成行程后将自动加载目的地地图与天气信息。
                   </div>
                 )}
+              </article>
+
+              <article className="flex flex-col rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm xl:max-h-[620px] xl:overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">预算与支出</h2>
+                    <p className="text-xs text-slate-500">智能预算拆分，快速记录行程开销</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {expensesLoading ? <span className="text-xs text-slate-400">消费记录同步中…</span> : null}
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                      总预算：{formatCurrency(budgetSummary?.total ?? formState.budgetCNY)}
+                    </span>
+                  </div>
+                </div>
+
+                {budgetSummary ? (
+                  <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1">
+                    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 sm:grid-cols-3">
+                      <div className="rounded-xl bg-white/60 px-3 py-2">
+                        <p className="text-xs text-slate-500">已记录支出</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">{formatCurrency(totalExpense, 2)}</p>
+                      </div>
+                      <div className="rounded-xl bg-white/60 px-3 py-2">
+                        <p className="text-xs text-slate-500">剩余预算</p>
+                        <p className="mt-1 text-sm font-semibold text-emerald-600">{formatCurrency(remainingBudget, 2)}</p>
+                      </div>
+                      <div className="rounded-xl bg-white/60 px-3 py-2">
+                        <p className="text-xs text-slate-500">每日平均预算</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">{formatCurrency(budgetSummary.dailyAverage, 2)}</p>
+                      </div>
+                    </div>
+
+                    <ul className="grid gap-4 sm:grid-cols-2">
+                      {budgetSummary.items.map((item) => {
+                        const actual = spentByBudgetCategory.get(item.category) ?? 0;
+                        const ratio = item.estimated > 0 ? actual / item.estimated : 0;
+                        const barWidth = ratio > 0 ? `${Math.min(100, Math.max(ratio * 100, 6))}%` : "0%";
+
+                        return (
+                          <li key={item.category} className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-4">
+                            <div className="flex items-center justify-between text-[11px] text-slate-500">
+                              <span className="text-xs font-semibold text-slate-600">{budgetCategoryLabels[item.category]}</span>
+                              <span>
+                                {formatCurrency(actual, 2)} / {formatCurrency(item.estimated)}
+                              </span>
+                            </div>
+                            <div className="mt-2 h-2 rounded-full bg-slate-100">
+                              <div className={clsx("h-full rounded-full transition-all", pickSegmentColor(ratio))} style={{ width: barWidth }} />
+                            </div>
+                            <p className="mt-2 text-xs font-medium text-slate-900">预计投入：{formatCurrency(item.estimated)}</p>
+                            <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{item.description}</p>
+                          </li>
+                        );
+                      })}
+                    </ul>
+
+                    {expenses.length > 0 ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-4">
+                        <h3 className="text-sm font-semibold text-slate-900">支出明细</h3>
+                        <ul className="mt-3 space-y-2">
+                          {expenses.map((expense) => (
+                            <li key={expense.id} className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600">
+                              <div className="min-w-0 space-y-1">
+                                <p className="font-semibold text-slate-900">
+                                  {budgetCategoryLabels[expense.category]} · {formatCurrency(expense.amount, 2)}
+                                </p>
+                                {expense.note ? <p className="text-[11px] text-slate-500">{expense.note}</p> : null}
+                                <p className="text-[11px] text-slate-400">
+                                  {new Date(expense.occurredAt || expense.createdAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void removeExpense(expense)}
+                                className="rounded-full border border-slate-200 px-2 py-1 text-[11px] text-slate-500 transition hover:border-slate-400 hover:text-slate-700"
+                              >
+                                删除
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mt-6 flex flex-1 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-8 text-center text-sm text-slate-500">
+                    生成行程后将提供预算拆分建议，并帮助跟踪支出。
+                  </div>
+                )}
+
+                <div className="mt-4 space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-900">记录实时支出</h3>
+                  <p className="text-[11px] text-slate-400">
+                    {!session
+                      ? "登录并保存行程后，支出可同步到云端。"
+                      : currentItineraryId
+                        ? "支出将实时同步到云端并与行程关联。"
+                        : "当前行程未保存到云端，消费会暂存于本地。"}
+                  </p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={expenseDraft.amount}
+                      onChange={(event) => handleExpenseFieldChange("amount", event.target.value)}
+                      placeholder="金额（¥）"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 sm:w-28"
+                    />
+                    <select
+                      value={expenseDraft.category}
+                      onChange={(event) => handleExpenseFieldChange("category", event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 sm:w-36"
+                    >
+                      {expenseCategories.map((category) => (
+                        <option key={category} value={category}>
+                          {budgetCategoryLabels[category]}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={expenseDraft.note}
+                      onChange={(event) => handleExpenseFieldChange("note", event.target.value)}
+                      placeholder="备注（可选）"
+                      className="w-full flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void addExpense()}
+                      disabled={expenseSubmitting}
+                      className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {expenseSubmitting ? "记录中…" : "记录"}
+                    </button>
+                  </div>
+                  {expenseError ? <p className="text-xs text-rose-500">{expenseError}</p> : null}
+                  {expenses.length === 0 && !expensesLoading ? (
+                    <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-4 text-center text-xs text-slate-500">
+                      记录消费后将展示明细，便于对比预算。
+                    </p>
+                  ) : budgetSummary ? null : (
+                    <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-4">
+                      <h3 className="text-sm font-semibold text-slate-900">支出明细</h3>
+                      <ul className="mt-3 space-y-2">
+                        {expenses.map((expense) => (
+                          <li key={expense.id} className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600">
+                            <div className="min-w-0 space-y-1">
+                              <p className="font-semibold text-slate-900">
+                                {budgetCategoryLabels[expense.category]} · {formatCurrency(expense.amount, 2)}
+                              </p>
+                              {expense.note ? <p className="text-[11px] text-slate-500">{expense.note}</p> : null}
+                              <p className="text-[11px] text-slate-400">
+                                {new Date(expense.occurredAt || expense.createdAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void removeExpense(expense)}
+                              className="rounded-full border border-slate-200 px-2 py-1 text-[11px] text-slate-500 transition hover:border-slate-400 hover:text-slate-700"
+                            >
+                              删除
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
               </article>
             </section>
           </div>

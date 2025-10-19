@@ -28,19 +28,24 @@ export async function POST(request: Request) {
     const { persist = false, ...rest } = parseResult.data;
     const preferences = rest as TravelPreferences;
 
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient({ access: "write" });
     const {
-      data: { session }
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: userError
+    } = await supabase.auth.getUser();
 
-    if (persist && !session) {
+    if (userError) {
+      console.warn("[Itineraries] Failed to verify user for POST", userError);
+    }
+
+    if (persist && !user) {
       return NextResponse.json({
         error: "UNAUTHORIZED",
         message: "请先登录后再保存到云端"
       }, { status: 401 });
     }
 
-    const userId = session?.user?.id ?? null;
+    const userId = user?.id ?? null;
     const { plan, source, note, itineraryId } = await generateItinerary(preferences, {
       persist,
       userId
@@ -58,12 +63,17 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient({ access: "write" });
     const {
-      data: { session }
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: userError
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (userError) {
+      console.warn("[Itineraries] Failed to verify user for GET", userError);
+    }
+
+    if (!user) {
       return NextResponse.json({
         error: "UNAUTHORIZED",
         message: "请先登录后查看云端行程"
@@ -77,7 +87,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabase
       .from("itineraries")
       .select("id, plan, preferences, source, created_at")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(limit > 0 ? limit : 20);
 
@@ -105,12 +115,17 @@ const deleteSchema = z.object({
 
 export async function DELETE(request: Request) {
   try {
-    const supabase = createSupabaseServerClient();
+    const supabase = createSupabaseServerClient({ access: "write" });
     const {
-      data: { session }
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: userError
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (userError) {
+      console.warn("[Itineraries] Failed to verify user for DELETE", userError);
+    }
+
+    if (!user) {
       return NextResponse.json({
         error: "UNAUTHORIZED",
         message: "请先登录后再删除云端行程"
@@ -132,7 +147,7 @@ export async function DELETE(request: Request) {
       .from("itineraries")
       .delete()
       .eq("id", id)
-      .eq("user_id", session.user.id);
+      .eq("user_id", user.id);
 
     if (error) {
       console.error("Failed to delete itinerary", error);
