@@ -26,21 +26,35 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Docker image
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL_NAME: ${{ secrets.LLM_MODEL_NAME || 'qwen-plus' }}
+          NEXT_PUBLIC_AMAP_KEY: ${{ secrets.NEXT_PUBLIC_AMAP_KEY }}
+          AMAP_REST_KEY: ${{ secrets.AMAP_REST_KEY }}
+          NEXT_PUBLIC_AMAP_SECURITY_JS_CODE: ${{ secrets.NEXT_PUBLIC_AMAP_SECURITY_JS_CODE }}
+          XFYUN_APP_ID: ${{ secrets.XFYUN_APP_ID }}
+          XFYUN_API_KEY: ${{ secrets.XFYUN_API_KEY }}
+          XFYUN_API_SECRET: ${{ secrets.XFYUN_API_SECRET }}
         run: |
           IMAGE_REPO=$(echo "ghcr.io/${{ github.repository }}/ai-travel-planner" | tr '[:upper:]' '[:lower:]')
           IMAGE_TAG=${{ github.ref_name }}
           docker build \
-            --build-arg NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }} \
-            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }} \
-            --build-arg LLM_ENDPOINT=${{ secrets.LLM_ENDPOINT }} \
-            --build-arg LLM_API_KEY=${{ secrets.LLM_API_KEY }} \
-            --build-arg LLM_MODEL_NAME=${{ secrets.LLM_MODEL_NAME }} \
-            --build-arg NEXT_PUBLIC_AMAP_KEY=${{ secrets.NEXT_PUBLIC_AMAP_KEY }} \
-            --build-arg NEXT_PUBLIC_AMAP_SECURITY_JS_CODE=${{ secrets.NEXT_PUBLIC_AMAP_SECURITY_JS_CODE }} \
-            --build-arg AMAP_REST_KEY=${{ secrets.AMAP_REST_KEY }} \
-            --build-arg XFYUN_APP_ID=${{ secrets.XFYUN_APP_ID }} \
-            --build-arg XFYUN_API_KEY=${{ secrets.XFYUN_API_KEY }} \
-            --build-arg XFYUN_API_SECRET=${{ secrets.XFYUN_API_SECRET }} \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL="$NEXT_PUBLIC_SUPABASE_URL" \
+            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+            --build-arg SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
+            --build-arg LLM_ENDPOINT="$LLM_ENDPOINT" \
+            --build-arg LLM_API_KEY="$LLM_API_KEY" \
+            --build-arg LLM_MODEL_NAME="$LLM_MODEL_NAME" \
+            --build-arg NEXT_PUBLIC_AMAP_KEY="$NEXT_PUBLIC_AMAP_KEY" \
+            --build-arg AMAP_REST_KEY="$AMAP_REST_KEY" \
+            --build-arg NEXT_PUBLIC_AMAP_SECURITY_JS_CODE="$NEXT_PUBLIC_AMAP_SECURITY_JS_CODE" \
+            --build-arg XFYUN_APP_ID="$XFYUN_APP_ID" \
+            --build-arg XFYUN_API_KEY="$XFYUN_API_KEY" \
+            --build-arg XFYUN_API_SECRET="$XFYUN_API_SECRET" \
             -t "$IMAGE_REPO:$IMAGE_TAG" .
           echo "IMAGE_REPO=$IMAGE_REPO" >> "$GITHUB_ENV"
           echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"

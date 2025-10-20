@@ -165,14 +165,28 @@ pnpm --filter web dev
 - **可观测性**：Sentry 捕获异常，Vercel Analytics/阿里云 ARMS 用于性能监控。
 
 ## 🐳 Docker 支持
-- `infra/docker/Dockerfile`：多阶段构建，使用 20-alpine 基础镜像，生成生产镜像。
-- `infra/docker/docker-compose.yml`：可选，整合 Supabase 本地服务、前端容器。
+- 根目录 `Dockerfile`：GitHub Actions 使用该文件构建并推送镜像到 GHCR。
+- `docker/runtime.env.example`：运行容器时的环境变量模板（不含引号，复制为 `docker/runtime.env` 后填写）。
 
-构建与运行示例：
+运行预构建镜像：
 ```bash
-docker build -t aitravelplanner:local -f infra/docker/Dockerfile .
-docker run --env-file .env -p 3000:3000 aitravelplanner:local
+cp docker/runtime.env.example docker/runtime.env
+# 修改 docker/runtime.env，填入 Supabase、LLM、AMap、讯飞等密钥
+
+docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v1.0.2
+docker run --env-file docker/runtime.env -p 3000:3000 ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v1.0.2
 ```
+
+如需本地构建，可显式指定构建时的公开环境变量：
+```bash
+docker build \
+   --build-arg NEXT_PUBLIC_SUPABASE_URL=... \
+   --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
+   --build-arg NEXT_PUBLIC_AMAP_KEY=... \
+   --build-arg NEXT_PUBLIC_AMAP_SECURITY_JS_CODE=... \
+   -t aitravelplanner:local .
+```
+服务器端密钥（Supabase Service Role、LLM、AMap REST、讯飞等）仅需在运行阶段通过 `--env-file` 或 `-e` 注入，镜像层中不会保存这些值。
 
 ## 🔄 CI/CD 与部署
 - **CI**：GitHub Actions 执行 `pnpm lint`、`pnpm test`、`pnpm build`，缓存 pnpm store。
