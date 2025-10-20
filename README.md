@@ -101,7 +101,7 @@ AITravelPlanner/
 - 推荐安装 ffmpeg（语音处理、音频格式转换）。
 
 ### 环境变量约定
-在项目根目录创建 `.env`（用于 Docker）与 `apps/web/.env.local`（用于本地开发），示例如下：
+在项目根目录创建 `.env`（用于 Docker）与 `apps/web/.env.local`（用于本地开发）。Docker 运行时可直接复制 `docker/runtime.env.example`，填入实际值后通过 `--env-file` 注入。示例如下：
 
 ```dotenv
 # Supabase
@@ -173,8 +173,8 @@ pnpm --filter web dev
 cp docker/runtime.env.example docker/runtime.env
 # 修改 docker/runtime.env，填入 Supabase、LLM、AMap、讯飞等密钥
 
-docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v1.0.2
-docker run --env-file docker/runtime.env -p 3000:3000 ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v1.0.2
+docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v1.0.3
+docker run --env-file docker/runtime.env -p 3000:3000 ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v1.0.3
 ```
 
 如需本地构建，可显式指定构建时的公开环境变量：
@@ -186,7 +186,7 @@ docker build \
    --build-arg NEXT_PUBLIC_AMAP_SECURITY_JS_CODE=... \
    -t aitravelplanner:local .
 ```
-服务器端密钥（Supabase Service Role、LLM、AMap REST、讯飞等）仅需在运行阶段通过 `--env-file` 或 `-e` 注入，镜像层中不会保存这些值。
+服务器端密钥（Supabase Service Role、LLM、AMap REST、讯飞等）必须在运行阶段通过 `--env-file` 或 `-e` 注入，镜像层中不要保存这些值。若 CI 过程中需要使用密钥，可在 Docker BuildKit 下使用 `RUN --mount=type=secret` 暂时读取，避免写入镜像层。详细示例见 `docs/architecture/overview.md` 的部署章节。
 
 ## 🔄 CI/CD 与部署
 - **CI**：GitHub Actions 执行 `pnpm lint`、`pnpm test`、`pnpm build`，缓存 pnpm store。
@@ -199,6 +199,7 @@ docker build \
 - 使用 Supabase RLS 保护用户数据，所有行程、费用记录与用户关联。
 - 加强日志脱敏，避免在日志中输出 key、敏感旅程信息。
 - 对外 API 调用增加速率限制与错误回退策略，保证稳定性。
+- CI/CD 及容器构建阶段不得长久保存敏感密钥，推荐使用 Docker BuildKit Secret 或部署平台的 Secret Manager 在运行时注入。
 
 ## 📄 提交与验收说明
 1. 代码托管在 GitHub，保持细粒度提交记录。
