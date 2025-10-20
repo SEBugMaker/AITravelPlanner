@@ -432,7 +432,7 @@ export function PlannerMap({
       clearRetryTimer();
       cleanupContext();
     };
-  }, [sendDebugLog]);
+  }, [sendDebugLog, basePoint]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -461,7 +461,7 @@ export function PlannerMap({
   useEffect(() => {
     if (!isMapReady) return;
     updateOverlaysRef.current();
-  }, [isMapReady, dayLocations, selectedDay]);
+  }, [isMapReady, dayLocations, selectedDay, basePoint]);
 
   const renderState = () => {
     if (!AMAP_KEY) {
