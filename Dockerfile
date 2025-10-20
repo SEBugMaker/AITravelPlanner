@@ -1,0 +1,60 @@
+FROM node:20-bullseye-slim AS builder
+WORKDIR /app
+
+ENV PNPM_HOME="/root/.local/share/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+ENV NEXT_TELEMETRY_DISABLED=1
+
+ARG NEXT_PUBLIC_SUPABASE_URL=""
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY=""
+ARG SUPABASE_SERVICE_ROLE_KEY=""
+ARG LLM_ENDPOINT=""
+ARG LLM_API_KEY=""
+ARG LLM_MODEL_NAME=""
+ARG NEXT_PUBLIC_AMAP_KEY=""
+ARG NEXT_PUBLIC_AMAP_SECURITY_JS_CODE=""
+ARG AMAP_REST_KEY=""
+ARG XFYUN_APP_ID=""
+ARG XFYUN_API_KEY=""
+ARG XFYUN_API_SECRET=""
+
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
+ENV LLM_ENDPOINT=$LLM_ENDPOINT
+ENV LLM_API_KEY=$LLM_API_KEY
+ENV LLM_MODEL_NAME=$LLM_MODEL_NAME
+ENV NEXT_PUBLIC_AMAP_KEY=$NEXT_PUBLIC_AMAP_KEY
+ENV NEXT_PUBLIC_AMAP_SECURITY_JS_CODE=$NEXT_PUBLIC_AMAP_SECURITY_JS_CODE
+ENV AMAP_REST_KEY=$AMAP_REST_KEY
+ENV XFYUN_APP_ID=$XFYUN_APP_ID
+ENV XFYUN_API_KEY=$XFYUN_API_KEY
+ENV XFYUN_API_SECRET=$XFYUN_API_SECRET
+
+RUN corepack enable
+
+COPY . .
+
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter web build
+RUN pnpm prune --prod
+
+FROM node:20-bullseye-slim AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PNPM_HOME="/root/.local/share/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN corepack enable
+
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/web ./apps/web
+
+EXPOSE 3000
+
+CMD ["pnpm", "--dir", "apps/web", "start"]

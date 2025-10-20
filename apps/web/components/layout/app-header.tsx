@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSessionContext } from "@supabase/auth-helpers-react";
 
@@ -9,31 +9,31 @@ export function AppHeader() {
   const router = useRouter();
   const { session, supabaseClient } = useSessionContext();
   const [loading, setLoading] = useState(false);
-  const [authSession, setAuthSession] = useState(session ?? null);
 
-  useEffect(() => {
-    setAuthSession(session ?? null);
-  }, [session]);
-
-  useEffect(() => {
-    const { data: listener } = supabaseClient.auth.onAuthStateChange((_, newSession) => {
-      setAuthSession(newSession ?? null);
-    });
-
-    return () => {
-      listener?.subscription.unsubscribe();
-    };
-  }, [supabaseClient]);
-
-  const isAuthenticated = Boolean(authSession);
+  const isAuthenticated = Boolean(session?.user);
 
   const handleSignOut = async () => {
     setLoading(true);
     try {
-      await supabaseClient.auth.signOut({ scope: "local" });
-      await supabaseClient.auth.signOut({ scope: "global" });
-      setAuthSession(null);
+      const { error } = await supabaseClient.auth.signOut();
+      if (error) {
+        throw error;
+      }
+
+      try {
+        await fetch("/api/auth/callback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ event: "SIGNED_OUT", session: null })
+        });
+      } catch (syncError) {
+        console.warn("[AppHeader] Failed to sync sign-out state", syncError);
+      }
+
+      router.refresh();
       router.push("/auth/login");
+    } catch (error) {
+      console.error("[AppHeader] Sign out failed", error);
     } finally {
       setLoading(false);
     }

@@ -1,0 +1,13 @@
+node_modules
+.git
+.next
+apps/web/.next
+apps/web/node_modules
+packages/**/dist
+coverage
+dist
+tmp
+.env
+.env.*
+LICENSE
+README.md
