@@ -45,7 +45,12 @@ export async function POST(request: Request) {
     }
 
     const { destination, includeWeather = true } = parsed.data;
-    const restKey = process.env.AMAP_REST_KEY;
+    // Accept several environment variable names for the REST key so CI / env files
+    // that use different names continue to work. Priority:
+    // 1) AMAP_REST_KEY (server-side REST key)
+    // 2) process.env.NEXT_PUBLIC_AMAP_KEY (fallback if only public key provided)
+    // 3) process.env.AMAP_KEY (legacy)
+    const restKey = process.env.AMAP_REST_KEY ?? process.env.NEXT_PUBLIC_AMAP_KEY ?? process.env.AMAP_KEY ?? null;
     if (!restKey) {
       return NextResponse.json({
         error: "AMAP_KEY_MISSING",

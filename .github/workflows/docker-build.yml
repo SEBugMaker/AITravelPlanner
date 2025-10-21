@@ -34,7 +34,10 @@ jobs:
           LLM_MODEL_NAME: ${{ secrets.LLM_MODEL_NAME || 'qwen-plus' }}
           NEXT_PUBLIC_AMAP_KEY: ${{ secrets.NEXT_PUBLIC_AMAP_KEY }}
           NEXT_PUBLIC_AMAP_SECURITY_JS_CODE: ${{ secrets.NEXT_PUBLIC_AMAP_SECURITY_JS_CODE }}
+          AMAP_REST_KEY: ${{ secrets.AMAP_REST_KEY }}
           XFYUN_APP_ID: ${{ secrets.XFYUN_APP_ID }}
+          XFYUN_API_KEY: ${{ secrets.XFYUN_API_KEY }}
+          XFYUN_API_SECRET: ${{ secrets.XFYUN_API_SECRET }}
         run: |
           IMAGE_REPO=$(echo "ghcr.io/${{ github.repository }}/ai-travel-planner" | tr '[:upper:]' '[:lower:]')
           IMAGE_TAG=${{ github.ref_name }}
