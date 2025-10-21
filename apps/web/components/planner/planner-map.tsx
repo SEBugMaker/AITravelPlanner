@@ -6,7 +6,7 @@ import AMapLoader from "@amap/amap-jsapi-loader";
 import type { DayLocation } from "@core/index";
 
 const FALLBACK_MIN_HEIGHT_PX = 320;
-const AMAP_KEY = (process.env.NEXT_PUBLIC_AMAP_KEY ?? "").trim();
+const ENV_AMAP_KEY = (process.env.NEXT_PUBLIC_AMAP_KEY ?? "").trim();
 const SECURITY_JS_CODE = (process.env.NEXT_PUBLIC_AMAP_SECURITY_JS_CODE ?? "").trim();
 
 type LogLevel = "info" | "warn" | "error";
@@ -22,6 +22,7 @@ export interface PlannerMapProps {
   selectedDay: number | null;
   loading: boolean;
   error?: string | null;
+  amapKey?: string | null;
 }
 
 type MapContext = {
@@ -138,7 +139,8 @@ export function PlannerMap({
   dayLocations,
   selectedDay,
   loading,
-  error
+  error,
+  amapKey
 }: PlannerMapProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const contextRef = useRef<MapContext>({ map: null, AMap: null, markers: [], polyline: null });
@@ -148,6 +150,12 @@ export function PlannerMap({
 
   const [isMapReady, setIsMapReady] = useState(false);
   const [mapInitError, setMapInitError] = useState<string | null>(null);
+
+  const resolvedAmapKey = useMemo(() => {
+    const trimmedCloud = (amapKey ?? "").trim();
+    if (trimmedCloud) return trimmedCloud;
+    return ENV_AMAP_KEY;
+  }, [amapKey]);
 
   const sendDebugLog = usePlannerDebugLog();
 
@@ -344,9 +352,11 @@ export function PlannerMap({
       if (destroyed) return;
 
       const container = containerRef.current;
-      if (!container || !AMAP_KEY) {
+      if (!container || !resolvedAmapKey) {
         setMapInitError(
-          AMAP_KEY ? "地图容器暂不可用，请稍后重试。" : "未配置 NEXT_PUBLIC_AMAP_KEY，无法加载地图。"
+          resolvedAmapKey
+            ? "地图容器暂不可用，请稍后重试。"
+            : "未检测到高德密钥，无法加载地图。请在设置页配置或通过环境变量注入。"
         );
         setIsMapReady(false);
         return;
@@ -382,7 +392,7 @@ export function PlannerMap({
         }
 
         const AMap = await AMapLoader.load({
-          key: AMAP_KEY,
+          key: resolvedAmapKey,
           version: "2.0",
           plugins: ["AMap.ToolBar", "AMap.Scale"]
         });
@@ -432,7 +442,7 @@ export function PlannerMap({
       clearRetryTimer();
       cleanupContext();
     };
-  }, [sendDebugLog, basePoint]);
+  }, [sendDebugLog, basePoint, resolvedAmapKey]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -464,8 +474,12 @@ export function PlannerMap({
   }, [isMapReady, dayLocations, selectedDay, basePoint]);
 
   const renderState = () => {
-    if (!AMAP_KEY) {
-      return <p className="text-xs text-amber-600">未配置 NEXT_PUBLIC_AMAP_KEY，无法加载地图。</p>;
+    if (!resolvedAmapKey) {
+      return (
+        <p className="text-xs text-amber-600">
+          未配置高德地图密钥，无法加载地图。请在设置页提供密钥或配置环境变量。
+        </p>
+      );
     }
     if (mapInitError) {
       return <p className="text-xs text-rose-500">{mapInitError}</p>;

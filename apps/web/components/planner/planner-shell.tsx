@@ -101,6 +101,27 @@ interface ExpenseRecord {
   origin: "local" | "remote";
 }
 
+interface SecretInfo {
+  configured: boolean;
+  preview: string | null;
+  value: string | null;
+}
+
+type SecretBundle = Record<"llm" | "supabase" | "amap" | "xfyun", SecretInfo>;
+
+function createEmptySecretInfo(): SecretInfo {
+  return { configured: false, preview: null, value: null };
+}
+
+function createDefaultSecretBundle(): SecretBundle {
+  return {
+    llm: createEmptySecretInfo(),
+    supabase: createEmptySecretInfo(),
+    amap: createEmptySecretInfo(),
+    xfyun: createEmptySecretInfo()
+  };
+}
+
 function formatCurrency(value: number | null | undefined, fractionDigits = 0): string {
   if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
     return "¥0";
@@ -144,6 +165,8 @@ export function PlannerShell(): JSX.Element {
   const [isSavingItinerary, setIsSavingItinerary] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
+  const [cloudSecrets, setCloudSecrets] = useState<SecretBundle>(createDefaultSecretBundle);
+  const [cloudSecretsLoading, setCloudSecretsLoading] = useState(false);
 
   const [savedItineraries, setSavedItineraries] = useState<SavedItineraryRecord[]>([]);
   const [savedLoading, setSavedLoading] = useState(false);
@@ -163,6 +186,7 @@ export function PlannerShell(): JSX.Element {
   const savedControllerRef = useRef<AbortController | null>(null);
   const locationControllerRef = useRef<AbortController | null>(null);
   const expenseControllerRef = useRef<AbortController | null>(null);
+  const secretsControllerRef = useRef<AbortController | null>(null);
 
   const {
     supported,
@@ -175,23 +199,123 @@ export function PlannerShell(): JSX.Element {
     error: speechError
   } = useSpeechRecognition();
 
+  const llmKeyConfigured = cloudSecrets.llm.configured;
+  const llmKeyPreview = cloudSecrets.llm.value ?? cloudSecrets.llm.preview;
+  const supabaseKeyConfigured = cloudSecrets.supabase.configured;
+  const amapKeyConfigured = cloudSecrets.amap.configured;
+  const amapKeyValue = cloudSecrets.amap.value ?? null;
+  const xfyunKeyConfigured = cloudSecrets.xfyun.configured;
+
+  const refreshSecretStatus = useCallback(async () => {
+    secretsControllerRef.current?.abort();
+
+    if (!session) {
+      setCloudSecrets(createDefaultSecretBundle());
+      setCloudSecretsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    secretsControllerRef.current = controller;
+    setCloudSecretsLoading(true);
+
+    try {
+      const response = await fetch("/api/settings/secrets", {
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal
+      });
+
+      if (response.status === 401) {
+        setCloudSecrets(createDefaultSecretBundle());
+        return;
+      }
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload) {
+        const message = payload?.message ?? "获取密钥状态失败";
+        throw new Error(message);
+      }
+
+      const entries: Array<{ key?: string; preview?: string | null; value?: string | null }> = Array.isArray(
+        (payload as any).secrets
+      )
+        ? (payload as any).secrets
+        : [];
+      const map = new Map(
+        entries
+          .filter((item) => typeof item?.key === "string")
+          .map((item) => [String(item?.key), item])
+      );
+
+      const next = createDefaultSecretBundle();
+
+      const assign = (targetKey: keyof SecretBundle, possibleKeys: string[]) => {
+        const entry = possibleKeys.map((name) => map.get(name)).find(Boolean);
+        if (!entry) {
+          next[targetKey] = createEmptySecretInfo();
+          return;
+        }
+        next[targetKey] = {
+          configured: true,
+          preview: typeof entry.preview === "string" ? entry.preview : null,
+          value: typeof entry.value === "string" ? entry.value : null
+        };
+      };
+
+      assign("llm", ["llmApiKey", "bailianApiKey"]);
+      assign("supabase", ["supabaseAnonKey"]);
+      assign("amap", ["amapWebKey", "amapApiKey"]);
+      assign("xfyun", ["xfyunAppSecret"]);
+
+      setCloudSecrets(next);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      console.error("[PlannerShell] refreshSecretStatus failed", error);
+      setCloudSecrets(createDefaultSecretBundle());
+    } finally {
+      if (secretsControllerRef.current === controller) {
+        secretsControllerRef.current = null;
+      }
+      setCloudSecretsLoading(false);
+    }
+  }, [session, supabaseKeyConfigured]);
+
   useEffect(() => {
     return () => {
       savedControllerRef.current?.abort();
       locationControllerRef.current?.abort();
       expenseControllerRef.current?.abort();
+      secretsControllerRef.current?.abort();
     };
   }, []);
 
-  const speechStatus = useMemo(
-    () => formatSpeechStatus(supported, listening, processing, transcript, speechError),
-    [supported, listening, processing, transcript, speechError]
-  );
+  const speechStatus = useMemo(() => {
+    if (cloudSecretsLoading) {
+      return { label: "正在检测密钥…", color: "text-slate-500" };
+    }
+    if (!xfyunKeyConfigured) {
+      return { label: "请先配置讯飞语音密钥", color: "text-amber-600" };
+    }
+    return formatSpeechStatus(supported, listening, processing, transcript, speechError);
+  }, [cloudSecretsLoading, xfyunKeyConfigured, supported, listening, processing, transcript, speechError]);
+
+  useEffect(() => {
+    void refreshSecretStatus();
+  }, [refreshSecretStatus]);
 
   const refreshSavedItineraries = useCallback(async () => {
     if (!session) {
       setSavedItineraries([]);
       setSavedError("登录后即可查看云端行程");
+      return;
+    }
+
+    if (!supabaseKeyConfigured) {
+      setSavedItineraries([]);
+      setSavedError("尚未配置 Supabase 匿名密钥，云端行程不可用。");
       return;
     }
 
@@ -251,6 +375,12 @@ export function PlannerShell(): JSX.Element {
     const normalized = destination.trim();
     if (!normalized) return;
 
+    if (!amapKeyConfigured) {
+      setLocationInfo({ location: null, weather: null });
+      setLocationError("请先在设置页配置高德地图密钥后再加载目的地。");
+      return;
+    }
+
     locationControllerRef.current?.abort();
     const controller = new AbortController();
     locationControllerRef.current = controller;
@@ -289,12 +419,18 @@ export function PlannerShell(): JSX.Element {
       }
       setLocationLoading(false);
     }
-  }, []);
+  }, [amapKeyConfigured]);
 
   const fetchExpensesForItinerary = useCallback(async (itineraryId: string) => {
     const normalized = itineraryId.trim();
     if (!normalized) {
       setExpenses([]);
+      return;
+    }
+
+    if (!supabaseKeyConfigured) {
+      setExpenses([]);
+      setExpenseError("尚未配置 Supabase 匿名密钥，无法同步云端消费记录。");
       return;
     }
 
@@ -372,7 +508,7 @@ export function PlannerShell(): JSX.Element {
       }
       setExpensesLoading(false);
     }
-  }, []);
+  }, [supabaseKeyConfigured]);
 
   const openSavedDrawer = useCallback(() => {
     if (!session) {
@@ -382,9 +518,16 @@ export function PlannerShell(): JSX.Element {
       return;
     }
 
+    if (!supabaseKeyConfigured) {
+      setSavedItineraries([]);
+      setSavedError("尚未配置 Supabase 匿名密钥，无法访问云端行程。");
+      setIsDrawerOpen(true);
+      return;
+    }
+
     setIsDrawerOpen(true);
     void refreshSavedItineraries();
-  }, [session, refreshSavedItineraries]);
+  }, [session, supabaseKeyConfigured, refreshSavedItineraries]);
 
   const closeSavedDrawer = useCallback(() => {
     setIsDrawerOpen(false);
@@ -451,6 +594,20 @@ export function PlannerShell(): JSX.Element {
     resetTranscript();
   }, [transcript, applyContentToPreferences, resetTranscript]);
 
+  const ensureLlmKeyReady = useCallback(() => {
+    if (cloudSecretsLoading) {
+      setFormError("正在检测云端密钥状态，请稍候…");
+      setFormSuccess(null);
+      return false;
+    }
+    if (!llmKeyConfigured) {
+      setFormError("请先在设置页面配置阿里云百炼 API Key，再生成智能行程。");
+      setFormSuccess(null);
+      return false;
+    }
+    return true;
+  }, [cloudSecretsLoading, llmKeyConfigured]);
+
   const submitTranscriptToAI = useCallback(async () => {
     const content = transcript.trim();
     if (!content) {
@@ -458,13 +615,17 @@ export function PlannerShell(): JSX.Element {
       return;
     }
 
-    const shouldPersist = formState.persist && Boolean(session);
+    if (!ensureLlmKeyReady()) {
+      return;
+    }
+
+  const shouldPersist = formState.persist && Boolean(session) && supabaseKeyConfigured;
 
     setFormError(null);
     setFormSuccess(null);
     setIsTranscriptGenerating(true);
     try {
-      const response = await fetch("/api/itineraries/from-transcript", {
+  const response = await fetch("/api/itineraries/from-transcript", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript: content, persist: shouldPersist })
@@ -530,6 +691,7 @@ export function PlannerShell(): JSX.Element {
     }
   }, [
     transcript,
+    ensureLlmKeyReady,
     formState.persist,
     session,
     fetchLocationInfo,
@@ -645,6 +807,11 @@ export function PlannerShell(): JSX.Element {
       return;
     }
 
+    if (!supabaseKeyConfigured) {
+      appendLocal("尚未配置 Supabase 密钥，消费记录暂存于本地。");
+      return;
+    }
+
     if (!currentItineraryId) {
       appendLocal("行程未保存到云端，此消费仅保存在本地。");
       return;
@@ -677,13 +844,13 @@ export function PlannerShell(): JSX.Element {
     } finally {
       setExpenseSubmitting(false);
     }
-  }, [expenseDraft, session, currentItineraryId, fetchExpensesForItinerary]);
+  }, [expenseDraft, session, supabaseKeyConfigured, currentItineraryId, fetchExpensesForItinerary]);
 
   const removeExpense = useCallback(
     async (record: ExpenseRecord) => {
       setExpenseError(null);
 
-      if (record.origin === "remote" && session && currentItineraryId) {
+      if (record.origin === "remote" && session && currentItineraryId && supabaseKeyConfigured) {
         try {
           const response = await fetch("/api/expenses", {
             method: "DELETE",
@@ -704,9 +871,14 @@ export function PlannerShell(): JSX.Element {
         return;
       }
 
+      if (record.origin === "remote" && !supabaseKeyConfigured) {
+        setExpenseError("尚未配置 Supabase 密钥，无法操作云端消费记录。");
+        return;
+      }
+
       setExpenses((prev) => prev.filter((expense) => expense.id !== record.id));
     },
-    [session, currentItineraryId, fetchExpensesForItinerary]
+    [session, supabaseKeyConfigured, currentItineraryId, fetchExpensesForItinerary]
   );
 
   const saveItineraryManually = useCallback(async () => {
@@ -718,6 +890,12 @@ export function PlannerShell(): JSX.Element {
     if (!session) {
       setFormError("请先登录后再保存到云端。");
       router.push("/auth/login");
+      return;
+    }
+
+    if (!supabaseKeyConfigured) {
+      setFormError("请先在设置页面配置 Supabase 匿名密钥，再保存到云端。");
+      setFormSuccess(null);
       return;
     }
 
@@ -756,7 +934,7 @@ export function PlannerShell(): JSX.Element {
     } finally {
       setIsSavingItinerary(false);
     }
-  }, [plan, session, router, formState, currentItineraryId, refreshSavedItineraries]);
+  }, [plan, session, supabaseKeyConfigured, router, formState, currentItineraryId, refreshSavedItineraries]);
 
   const handlePersistToggle = useCallback(
     (checked: boolean) => {
@@ -766,12 +944,18 @@ export function PlannerShell(): JSX.Element {
         return;
       }
 
+      if (checked && !supabaseKeyConfigured) {
+        setFormError("请先配置 Supabase 匿名密钥后再开启自动保存。");
+        setFormSuccess(null);
+        return;
+      }
+
       setFormState((prev) => ({
         ...prev,
-        persist: checked && Boolean(session)
+        persist: checked && Boolean(session) && supabaseKeyConfigured
       }));
     },
-    [session, router]
+    [session, supabaseKeyConfigured, router]
   );
 
   const handleSubmit = useCallback(
@@ -790,12 +974,16 @@ export function PlannerShell(): JSX.Element {
         return;
       }
 
-      const { persist, ...preferences } = formState;
-      const shouldPersist = persist && Boolean(session);
+      if (!ensureLlmKeyReady()) {
+        return;
+      }
+
+  const { persist, ...preferences } = formState;
+  const shouldPersist = persist && Boolean(session) && supabaseKeyConfigured;
 
       setIsGenerating(true);
       try {
-        const response = await fetch("/api/itineraries", {
+  const response = await fetch("/api/itineraries", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...preferences, persist: shouldPersist })
@@ -827,7 +1015,7 @@ export function PlannerShell(): JSX.Element {
         setIsGenerating(false);
       }
     },
-    [formState, session, fetchLocationInfo, refreshSavedItineraries]
+    [formState, session, supabaseKeyConfigured, ensureLlmKeyReady, fetchLocationInfo, refreshSavedItineraries]
   );
 
   useEffect(() => {
@@ -857,8 +1045,14 @@ export function PlannerShell(): JSX.Element {
       return;
     }
 
+    if (!supabaseKeyConfigured) {
+      setExpenses([]);
+      setExpenseError("尚未配置 Supabase 匿名密钥，无法同步云端消费记录。");
+      return;
+    }
+
     void fetchExpensesForItinerary(currentItineraryId);
-  }, [currentItineraryId, session, fetchExpensesForItinerary]);
+  }, [currentItineraryId, session, supabaseKeyConfigured, fetchExpensesForItinerary]);
 
   const budgetSummary = useMemo(() => {
     if (!plan) {
@@ -923,7 +1117,8 @@ export function PlannerShell(): JSX.Element {
               <button
                 type="button"
                 onClick={openSavedDrawer}
-                className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+                disabled={!session || !supabaseKeyConfigured || cloudSecretsLoading}
+                className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 我的云端行程
               </button>
@@ -950,9 +1145,10 @@ export function PlannerShell(): JSX.Element {
                         type="button"
                         onClick={() => {
                           if (processing) return;
+                          if (cloudSecretsLoading || !xfyunKeyConfigured) return;
                           return listening ? stopListening() : startListening();
                         }}
-                        disabled={processing}
+                        disabled={processing || cloudSecretsLoading || !xfyunKeyConfigured}
                         className={clsx(
                           "flex-1 rounded-xl px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-70",
                           processing
@@ -984,7 +1180,7 @@ export function PlannerShell(): JSX.Element {
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <button
                         type="button"
-                        disabled={!transcript || processing || isTranscriptGenerating}
+                        disabled={!transcript || processing || isTranscriptGenerating || cloudSecretsLoading || !xfyunKeyConfigured}
                         onClick={adoptTranscript}
                         className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -992,7 +1188,7 @@ export function PlannerShell(): JSX.Element {
                       </button>
                       <button
                         type="button"
-                        disabled={!transcript || processing || isTranscriptGenerating || isGenerating}
+                        disabled={!transcript || processing || isTranscriptGenerating || isGenerating || cloudSecretsLoading || !llmKeyConfigured}
                         onClick={() => void submitTranscriptToAI()}
                         className="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
                       >
@@ -1007,6 +1203,71 @@ export function PlannerShell(): JSX.Element {
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-semibold text-slate-900">旅行偏好</h2>
                   <span className="text-sm text-slate-500">{dayCountLabel}</span>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-xs text-slate-600">
+                  <div className="flex flex-col gap-1">
+                    {cloudSecretsLoading ? (
+                      <span>正在检测云端密钥状态…</span>
+                    ) : (
+                      <>
+                        <span className={clsx(llmKeyConfigured ? "text-emerald-600" : "text-amber-600")}>
+                          百炼 API Key：
+                          {llmKeyConfigured
+                            ? "已配置，可生成智能行程。"
+                            : session
+                              ? "未配置，生成行程功能暂不可用。"
+                              : "需登录并配置后才能生成行程。"}
+                          {llmKeyConfigured && llmKeyPreview ? (
+                            <span className="ml-2 font-mono text-[11px] text-slate-500">{llmKeyPreview}</span>
+                          ) : null}
+                        </span>
+                        <span className={clsx(xfyunKeyConfigured ? "text-emerald-600" : "text-amber-600")}>
+                          讯飞语音密钥：
+                          {xfyunKeyConfigured
+                            ? "已配置，可使用语音速记。"
+                            : session
+                              ? "未配置，录音识别已停用。"
+                              : "需登录并配置后才能使用语音速记。"}
+                        </span>
+                        <span className={clsx(amapKeyConfigured ? "text-emerald-600" : "text-amber-600")}>
+                          高德地图密钥：
+                          {amapKeyConfigured
+                            ? "已配置，可加载地图与定位。"
+                            : session
+                              ? "未配置，地图功能已禁用。"
+                              : "需登录并配置后才能加载地图。"}
+                        </span>
+                        <span className={clsx(supabaseKeyConfigured ? "text-emerald-600" : "text-amber-600")}>
+                          Supabase 匿名密钥：
+                          {supabaseKeyConfigured
+                            ? "已配置，可保存并同步云端行程。"
+                            : session
+                              ? "未配置，云端保存与同步不可用。"
+                              : "需登录并配置后才能启用云端同步。"}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => router.push(session ? "/settings" : "/auth/login")}
+                      className="rounded-full border border-slate-300 px-3 py-1 text-[11px] text-slate-600 transition hover:border-slate-400 hover:text-slate-900"
+                    >
+                      {session ? "前往设置" : "登录配置"}
+                    </button>
+                    {session ? (
+                      <button
+                        type="button"
+                        onClick={() => void refreshSecretStatus()}
+                        disabled={cloudSecretsLoading}
+                        className="rounded-full border border-slate-200 px-3 py-1 text-[11px] text-slate-500 transition hover:border-slate-400 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {cloudSecretsLoading ? "刷新中…" : "刷新状态"}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -1120,17 +1381,20 @@ export function PlannerShell(): JSX.Element {
                 <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-sm text-slate-600">
                   <input
                     type="checkbox"
-                    checked={formState.persist && Boolean(session)}
-                    disabled={!session}
+                    checked={formState.persist && Boolean(session) && supabaseKeyConfigured}
+                    disabled={!session || !supabaseKeyConfigured || cloudSecretsLoading}
                     onChange={(event) => handlePersistToggle(event.target.checked)}
                     className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
                   />
-                  <span>生成后保存到云端行程（需登录）</span>
+                  <span>
+                    生成后保存到云端行程（需登录）
+                    {!supabaseKeyConfigured ? " - 请先配置 Supabase 密钥" : ""}
+                  </span>
                 </label>
 
                 <button
                   type="submit"
-                  disabled={isGenerating || isTranscriptGenerating}
+                  disabled={isGenerating || isTranscriptGenerating || cloudSecretsLoading || !llmKeyConfigured}
                   className="w-full rounded-2xl bg-gradient-to-r from-slate-900 to-slate-700 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isGenerating ? "正在生成行程…" : isTranscriptGenerating ? "语音生成中…" : "生成智能行程"}
@@ -1335,7 +1599,12 @@ export function PlannerShell(): JSX.Element {
                   <button
                     type="button"
                     onClick={() => void fetchLocationInfo(formState.destination)}
-                    disabled={locationLoading || !formState.destination}
+                    disabled={
+                      locationLoading ||
+                      !formState.destination ||
+                      cloudSecretsLoading ||
+                      !amapKeyConfigured
+                    }
                     className="rounded-full border border-slate-300 px-4 py-1.5 text-xs font-medium text-slate-600 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {locationLoading ? "刷新中…" : "刷新"}
@@ -1355,6 +1624,7 @@ export function PlannerShell(): JSX.Element {
                       selectedDay={selectedDayPlan?.day ?? null}
                       loading={locationLoading}
                       error={locationError}
+                      amapKey={amapKeyValue ?? null}
                     />
 
                     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
@@ -1471,6 +1741,8 @@ export function PlannerShell(): JSX.Element {
                   <p className="text-[11px] text-slate-400">
                     {!session
                       ? "登录并保存行程后，支出可同步到云端。"
+                      : !supabaseKeyConfigured
+                        ? "尚未配置 Supabase 密钥，消费记录将仅保存在本地。"
                       : currentItineraryId
                         ? "支出将实时同步到云端并与行程关联。"
                         : "当前行程未保存到云端，消费会暂存于本地。"}
@@ -1568,9 +1840,14 @@ export function PlannerShell(): JSX.Element {
                       setSavedError("登录后即可查看云端行程");
                       return;
                     }
+                    if (!supabaseKeyConfigured) {
+                      setSavedItineraries([]);
+                      setSavedError("尚未配置 Supabase 匿名密钥，云端行程不可用。");
+                      return;
+                    }
                     void refreshSavedItineraries();
                   }}
-                  disabled={savedLoading || (!session && !savedError)}
+                  disabled={savedLoading || (!session && !savedError) || !supabaseKeyConfigured}
                   className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {savedLoading ? "刷新中…" : "刷新"}

@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import type WebSocketType from "ws";
 import type { RawData as WebSocketRawData } from "ws";
+import { createSupabaseServerClient } from "../../../../lib/supabaseServer";
+import { getDecryptedUserSecret } from "../../../../lib/services/user-secrets";
 
 export const runtime = "nodejs";
 
@@ -198,25 +200,41 @@ export async function POST(request: Request) {
 
     debugLog("收到语音识别请求", { audioLength: audioBase64.length });
 
-    const appId =
-      process.env.XFYUN_APP_ID ??
-      process.env.NEXT_PUBLIC_XFYUN_APP_ID ??
-      process.env.IFLYTEK_APP_ID ??
-      process.env.NEXT_PUBLIC_IFLYTEK_APP_ID ??
-      null;
-    const apiKey =
-      process.env.XFYUN_API_KEY ??
-      process.env.NEXT_PUBLIC_XFYUN_API_KEY ??
-      process.env.IFLYTEK_API_KEY ??
-      process.env.NEXT_PUBLIC_IFLYTEK_API_KEY ??
-      null;
-    const apiSecret =
-      process.env.XFYUN_API_SECRET ??
-      process.env.IFLYTEK_API_SECRET ??
-      process.env.NEXT_PUBLIC_XFYUN_API_SECRET ??
-      process.env.NEXT_PUBLIC_IFLYTEK_API_SECRET ??
-      null;
-  const domain = process.env.XFYUN_DOMAIN ?? "iat";
+    // Prefer user-scoped secret stored in user_secrets table. If absent, fall back to server env.
+    const supabase = createSupabaseServerClient({ access: "write" });
+    const {
+      data: { user },
+      error: userError
+    } = await supabase.auth.getUser();
+
+    if (userError) {
+      console.warn("[XFYun] Failed to verify user", userError);
+    }
+
+    let appId: string | null = null;
+    let apiKey: string | null = null;
+    let apiSecret: string | null = null;
+    const domain = process.env.XFYUN_DOMAIN ?? "iat";
+
+    if (user?.id) {
+      try {
+        // user-stored secret names: xfyunAppId (optional), xfyunAppKey, xfyunAppSecret or xfyunAppSecret
+        const userSecret = await getDecryptedUserSecret(user.id, "xfyunAppSecret");
+        const userAppId = await getDecryptedUserSecret(user.id, "xfyunAppId");
+        const userApiKey = await getDecryptedUserSecret(user.id, "xfyunApiKey");
+
+        if (userSecret) apiSecret = userSecret;
+        if (userAppId) appId = userAppId;
+        if (userApiKey) apiKey = userApiKey;
+      } catch (err) {
+        console.warn("[XFYun] failed to read user secret", err);
+      }
+    }
+
+    // Fallback to env if user-scoped secrets not present
+    appId = appId ?? process.env.XFYUN_APP_ID ?? process.env.NEXT_PUBLIC_XFYUN_APP_ID ?? process.env.IFLYTEK_APP_ID ?? process.env.NEXT_PUBLIC_IFLYTEK_APP_ID ?? null;
+    apiKey = apiKey ?? process.env.XFYUN_API_KEY ?? process.env.NEXT_PUBLIC_XFYUN_API_KEY ?? process.env.IFLYTEK_API_KEY ?? process.env.NEXT_PUBLIC_IFLYTEK_API_KEY ?? null;
+    apiSecret = apiSecret ?? process.env.XFYUN_API_SECRET ?? process.env.IFLYTEK_API_SECRET ?? process.env.NEXT_PUBLIC_XFYUN_API_SECRET ?? process.env.NEXT_PUBLIC_IFLYTEK_API_SECRET ?? null;
 
     if (!appId || !apiKey || !apiSecret) {
       const missingVars = [
@@ -230,9 +248,9 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: "NOT_CONFIGURED",
-          message: `讯飞语音识别未启用，请在环境变量中配置 ${missingVars || "XFYUN_APP_ID、XFYUN_API_KEY、XFYUN_API_SECRET"}`
+          message: `讯飞语音识别未启用，请在设置页配置讯飞密钥或在环境变量中配置 ${missingVars || "XFYUN_APP_ID、XFYUN_API_KEY、XFYUN_API_SECRET"}`
         },
-        { status: 500 }
+        { status: 503 }
       );
     }
 

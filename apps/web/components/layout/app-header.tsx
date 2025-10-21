@@ -52,8 +52,8 @@ export function AppHeader() {
           <Link href="/planner" className="transition hover:text-slate-900">
             智能规划
           </Link>
-          <Link href="/#features" className="transition hover:text-slate-900">
-            功能亮点
+          <Link href="/settings" className="transition hover:text-slate-900">
+            配置
           </Link>
         </nav>
         <div className="flex items-center gap-4">

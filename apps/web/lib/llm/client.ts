@@ -7,6 +7,7 @@ import type {
   DiningRecommendation
 } from "@core/index";
 import { buildItineraryPrompt } from "./prompts";
+import { getDecryptedUserSecret } from "../services/user-secrets";
 
 interface LLMResponseChoice {
   message?: {
@@ -30,11 +31,28 @@ interface GenerateItineraryResult {
   rawText: string | null;
 }
 
+interface LLMRequestOptions {
+  userId?: string | null;
+}
+
 export async function requestItineraryFromLLM(
-  preferences: TravelPreferences
+  preferences: TravelPreferences,
+  options: LLMRequestOptions = {}
 ): Promise<GenerateItineraryResult> {
   const endpoint = process.env.LLM_ENDPOINT;
-  const apiKey = process.env.LLM_API_KEY;
+
+  let apiKey = process.env.LLM_API_KEY;
+  if (options.userId) {
+    const userScopedKey = await getDecryptedUserSecret(options.userId, "llmApiKey");
+    if (userScopedKey) {
+      apiKey = userScopedKey;
+    } else {
+      const legacyKey = await getDecryptedUserSecret(options.userId, "bailianApiKey");
+      if (legacyKey) {
+        apiKey = legacyKey;
+      }
+    }
+  }
   const model = process.env.LLM_MODEL_NAME ?? "qwen-plus";
 
   if (!endpoint || !apiKey) {

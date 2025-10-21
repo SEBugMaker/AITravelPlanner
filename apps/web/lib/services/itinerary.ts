@@ -32,7 +32,9 @@ export async function generateItinerary(
   preferences: TravelPreferences,
   options: GenerateItineraryOptions = {}
 ): Promise<GenerateItineraryResponse> {
-  const llmResult = await requestItineraryFromLLM(preferences);
+  const llmResult = await requestItineraryFromLLM(preferences, {
+    userId: options.userId ?? null
+  });
 
   let plan: ItineraryPlan;
   let source: GenerateItineraryResponse["source"] = "fallback";
