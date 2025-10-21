@@ -4,6 +4,28 @@
 
 ## 认证与通用约定
 
+## 🚀 快速开始 — 使用预构建 Docker 镜像进行 API 测试
+
+欲快速在本地测试 API，可以直接拉取并运行项目的预构建镜像。更多完整步骤见仓库根目录 `README.md`。
+
+示例：
+
+```bash
+# 如果仓库为私有，请先登录 GHCR
+echo "YOUR_GH_PAT" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+
+docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+
+docker run -d --name ai-travel-api -p 3000:3000 \
+	-e NEXT_PUBLIC_SUPABASE_URL="https://your-supabase-url.supabase.co" \
+	-e NEXT_PUBLIC_SUPABASE_ANON_KEY="your_anon_key_here" \
+	ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+
+# 然后通过 curl/postman 调用 API
+curl http://localhost:3000/api/health
+```
+
+
 | 项目 | 约定 |
 | --- | --- |
 | 认证方式 | 采用 Supabase Auth，前端携带 `supabase.auth.session()` 返回的 `access_token` 写入 `Authorization: Bearer <token>`；部分内部接口允许服务端凭证调用。 |

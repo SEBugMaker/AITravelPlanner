@@ -2,7 +2,64 @@
 
 > 借助大语言模型、语音交互与地图服务，帮助用户快速制定个性化旅行计划并实时管理行程与预算。
 
-## 🔍 项目概览
+## � 快速开始 — 拉取并运行预构建 Docker 镜像
+
+以下步骤可帮助你在本地快速拉取并运行项目的预构建镜像（例如：GHCR 上的 v2.0.2）。这些命令可直接复制到 macOS/zsh 终端执行。
+
+1) 登录 GitHub Container Registry（如果仓库或包为私有，需要认证）
+
+```bash
+# 使用 GitHub Personal Access Token（需包含 read:packages 权限）
+echo "YOUR_GH_PAT" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+```
+
+2) 拉取镜像
+
+```bash
+docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+```
+
+3) 以后台容器运行（示例：映射到本地 3000 端口）
+
+如果镜像需要运行时环境变量（强烈建议为 Supabase、LLM、地图与语音服务提供值），请在下面替换占位符：
+
+```bash
+docker run -d --name ai-travel-v2.0.2 -p 3000:3000 \
+   -e NEXT_PUBLIC_SUPABASE_URL="https://your-supabase-url.supabase.co" \
+   -e NEXT_PUBLIC_SUPABASE_ANON_KEY="your_anon_key_here" \
+   -e SUPABASE_SERVICE_ROLE_KEY="your_service_role_key_here" \
+   ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+```
+
+若你已将环境写入文件 `docker/runtime.env`，也可以使用 `--env-file`：
+
+```bash
+docker run -d --name ai-travel-v2.0.2 -p 3000:3000 --env-file docker/runtime.env \
+   ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+```
+
+4) 查看容器日志
+
+```bash
+docker logs -f ai-travel-v2.0.2
+```
+
+快速故障排查
+- 拉取失败（EOF / authentication required）：请先执行 `docker login ghcr.io`，确保 PAT 拥有 `read:packages` 权限并使用正确的用户名。
+- 平台不匹配警告（arm64 vs amd64）：在 Apple Silicon 上可能看到警告，若需要可加 `--platform linux/amd64`（会用到 QEMU，性能较慢）：
+
+```bash
+docker run -d --platform linux/amd64 --name ai-travel-v2.0.2 -p 3000:3000 \
+   ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+```
+
+- 容器启动但提示 Supabase Key 缺失：按上面示例注入 `NEXT_PUBLIC_SUPABASE_URL` 与 `NEXT_PUBLIC_SUPABASE_ANON_KEY` 环境变量。
+- Node/undici TLS 错误（DEPTH_ZERO_SELF_SIGNED_CERT）：表示访问的服务使用自签名证书，需要在宿主机信任对应 CA，或在开发环境短期使用 `NODE_TLS_REJECT_UNAUTHORIZED=0`（不推荐用于生产）。
+
+---
+
+
+## �🔍 项目概览
 AI Travel Planner 针对“难以快速做出行程决策、缺乏实时调整能力、预算管理困难”等痛点，提供从需求采集、行程生成到费用跟踪的一体化体验。用户能够通过语音或文字描述旅行偏好，系统自动生成包含交通、住宿、景点、美食的详细行程，并结合预算分析和云端同步，实现跨设备、多人协作的旅行规划。
 
 ## ✨ 核心功能
