@@ -94,7 +94,31 @@ export async function GET() {
         };
       });
 
-    return NextResponse.json({ secrets });
+    const secretMap = new Map(secrets.map((item) => [item.key, item]));
+
+    const ensureEnvSecret = (key: string, rawValue: string | undefined | null) => {
+      if (secretMap.has(key)) {
+        return;
+      }
+      const value = typeof rawValue === "string" ? rawValue.trim() : "";
+      if (!value) {
+        return;
+      }
+      secretMap.set(key, {
+        key,
+        value: null,
+        preview: createSecretPreview(value),
+        updatedAt: null
+      });
+    };
+
+    ensureEnvSecret("supabaseAnonKey", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+    ensureEnvSecret("llmApiKey", process.env.LLM_API_KEY ?? process.env.BAILIAN_API_KEY);
+    ensureEnvSecret("amapWebKey", process.env.NEXT_PUBLIC_AMAP_KEY);
+    ensureEnvSecret("xfyunApiKey", process.env.XFYUN_API_KEY ?? process.env.NEXT_PUBLIC_XFYUN_API_KEY);
+    ensureEnvSecret("xfyunAppSecret", process.env.XFYUN_API_SECRET ?? process.env.IFLYTEK_API_SECRET ?? process.env.NEXT_PUBLIC_XFYUN_API_SECRET ?? process.env.NEXT_PUBLIC_IFLYTEK_API_SECRET);
+
+    return NextResponse.json({ secrets: Array.from(secretMap.values()) });
   } catch (error) {
     console.error("[Settings] Unhandled secrets GET error", error);
     return NextResponse.json({
