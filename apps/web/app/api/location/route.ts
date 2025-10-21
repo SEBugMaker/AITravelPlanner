@@ -59,9 +59,9 @@ export async function POST(request: Request) {
     if (!restKey) {
       try {
   // @ts-ignore - dynamic import to avoid static resolution issues in some CI/typecheck setups
-  const { createSupabaseServerClient } = await import("../../../../lib/supabaseServer");
+  const { createSupabaseServerClient } = await import("../../../lib/supabaseServer");
   // @ts-ignore - dynamic import to avoid static resolution issues in some CI/typecheck setups
-  const { getDecryptedUserSecret } = await import("../../../../lib/services/user-secrets");
+  const { getDecryptedUserSecret } = await import("../../../lib/services/user-secrets");
         const supabase = createSupabaseServerClient({ access: "write" });
         const { data: { user }, error: userError } = await supabase.auth.getUser();
         if (!user || userError) {
