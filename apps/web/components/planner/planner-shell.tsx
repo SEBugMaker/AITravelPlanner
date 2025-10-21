@@ -122,6 +122,19 @@ function createDefaultSecretBundle(): SecretBundle {
   };
 }
 
+function maskSecretForDisplay(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (trimmed.length <= 6) {
+    return trimmed;
+  }
+  const prefix = trimmed.slice(0, 3);
+  const suffix = trimmed.slice(-3);
+  return `${prefix}${"*".repeat(Math.max(3, trimmed.length - 6))}${suffix}`;
+}
+
 function formatCurrency(value: number | null | undefined, fractionDigits = 0): string {
   if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
     return "¥0";
@@ -201,16 +214,30 @@ export function PlannerShell(): JSX.Element {
 
   const llmKeyConfigured = cloudSecrets.llm.configured;
   const llmKeyPreview = cloudSecrets.llm.value ?? cloudSecrets.llm.preview;
-  const supabaseKeyConfigured = cloudSecrets.supabase.configured;
+  const envSupabaseValue = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
+  const envSupabasePreview = envSupabaseValue ? maskSecretForDisplay(envSupabaseValue) : null;
+  const supabaseKeyConfigured = cloudSecrets.supabase.configured || Boolean(envSupabasePreview);
   const amapKeyConfigured = cloudSecrets.amap.configured;
   const amapKeyValue = cloudSecrets.amap.value ?? null;
   const xfyunKeyConfigured = cloudSecrets.xfyun.configured;
+
+  const applyEnvSecrets = useCallback((target: SecretBundle) => {
+    if (envSupabasePreview && !target.supabase.configured) {
+      target.supabase = {
+        configured: true,
+        preview: envSupabasePreview,
+        value: null
+      };
+    }
+  }, [envSupabasePreview]);
 
   const refreshSecretStatus = useCallback(async () => {
     secretsControllerRef.current?.abort();
 
     if (!session) {
-      setCloudSecrets(createDefaultSecretBundle());
+      const fallback = createDefaultSecretBundle();
+      applyEnvSecrets(fallback);
+      setCloudSecrets(fallback);
       setCloudSecretsLoading(false);
       return;
     }
@@ -227,7 +254,9 @@ export function PlannerShell(): JSX.Element {
       });
 
       if (response.status === 401) {
-        setCloudSecrets(createDefaultSecretBundle());
+        const fallback = createDefaultSecretBundle();
+        applyEnvSecrets(fallback);
+        setCloudSecrets(fallback);
         return;
       }
 
@@ -268,20 +297,24 @@ export function PlannerShell(): JSX.Element {
       assign("amap", ["amapWebKey", "amapApiKey"]);
       assign("xfyun", ["xfyunAppSecret"]);
 
+      applyEnvSecrets(next);
+
       setCloudSecrets(next);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
       }
       console.error("[PlannerShell] refreshSecretStatus failed", error);
-      setCloudSecrets(createDefaultSecretBundle());
+      const fallback = createDefaultSecretBundle();
+      applyEnvSecrets(fallback);
+      setCloudSecrets(fallback);
     } finally {
       if (secretsControllerRef.current === controller) {
         secretsControllerRef.current = null;
       }
       setCloudSecretsLoading(false);
     }
-  }, [session, supabaseKeyConfigured]);
+  }, [session, supabaseKeyConfigured, applyEnvSecrets]);
 
   useEffect(() => {
     return () => {
