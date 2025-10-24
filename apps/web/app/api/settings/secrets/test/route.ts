@@ -26,14 +26,22 @@ async function resolveUserId() {
 async function resolveSecretValue(userId: string | null, key: string): Promise<string | null> {
   const primary = await getDecryptedUserSecret(userId, key);
   if (primary) return primary;
-
+  // If user stored a secret we returned it above. For amapWebKey, avoid returning
+  // a value that equals the backend REST key (common misconfiguration). Prefer
+  // the build-time NEXT_PUBLIC_AMAP_KEY when safe.
+  const restKey = typeof process.env.AMAP_REST_KEY === "string" ? process.env.AMAP_REST_KEY.trim() : "";
   switch (key) {
     case "llmApiKey":
       return process.env.LLM_API_KEY ?? process.env.BAILIAN_API_KEY ?? null;
     case "supabaseAnonKey":
       return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? null;
-    case "amapWebKey":
-      return process.env.NEXT_PUBLIC_AMAP_KEY ?? null;
+    case "amapWebKey": {
+      const envKey = typeof process.env.NEXT_PUBLIC_AMAP_KEY === "string" ? process.env.NEXT_PUBLIC_AMAP_KEY.trim() : "";
+      if (primary && primary.trim() && primary.trim() !== restKey) {
+        return primary;
+      }
+      return envKey || null;
+    }
     case "xfyunApiKey":
       return (
         process.env.XFYUN_API_KEY ??
