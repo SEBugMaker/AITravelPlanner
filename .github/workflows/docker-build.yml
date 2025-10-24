@@ -25,6 +25,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Validate AMAP key configuration
+        run: |
+          # Ensure repository secrets are not misconfigured: NEXT_PUBLIC_AMAP_KEY must not equal AMAP_REST_KEY
+          if [ "${{ secrets.NEXT_PUBLIC_AMAP_KEY }}" = "${{ secrets.AMAP_REST_KEY }}" ]; then
+            echo "ERROR: NEXT_PUBLIC_AMAP_KEY is identical to AMAP_REST_KEY. This will embed the REST key into the frontend bundle and cause USERKEY_PLAT_NOMATCH."
+            exit 1
+          fi
+          if [ -z "${{ secrets.NEXT_PUBLIC_AMAP_KEY }}" ]; then
+            echo "WARNING: NEXT_PUBLIC_AMAP_KEY is empty. Frontend will not have a web JS key in build-time env."
+          fi
+
       - name: Build Docker image
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
