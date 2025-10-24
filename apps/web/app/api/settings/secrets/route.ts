@@ -114,7 +114,12 @@ export async function GET() {
 
     ensureEnvSecret("supabaseAnonKey", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
     ensureEnvSecret("llmApiKey", process.env.LLM_API_KEY ?? process.env.BAILIAN_API_KEY);
-    ensureEnvSecret("amapWebKey", process.env.NEXT_PUBLIC_AMAP_KEY);
+  // Avoid accidentally exposing the backend REST key via env fallback.
+  // If NEXT_PUBLIC_AMAP_KEY equals AMAP_REST_KEY, treat it as absent here.
+  const rawEnvAmap = typeof process.env.NEXT_PUBLIC_AMAP_KEY === "string" ? process.env.NEXT_PUBLIC_AMAP_KEY.trim() : "";
+  const rawRestAmap = typeof process.env.AMAP_REST_KEY === "string" ? process.env.AMAP_REST_KEY.trim() : "";
+  const safeEnvAmap = rawEnvAmap && rawEnvAmap !== rawRestAmap ? rawEnvAmap : undefined;
+  ensureEnvSecret("amapWebKey", safeEnvAmap);
     ensureEnvSecret("xfyunApiKey", process.env.XFYUN_API_KEY ?? process.env.NEXT_PUBLIC_XFYUN_API_KEY);
     ensureEnvSecret("xfyunAppSecret", process.env.XFYUN_API_SECRET ?? process.env.IFLYTEK_API_SECRET ?? process.env.NEXT_PUBLIC_XFYUN_API_SECRET ?? process.env.NEXT_PUBLIC_IFLYTEK_API_SECRET);
 
