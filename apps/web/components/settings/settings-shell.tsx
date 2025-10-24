@@ -42,9 +42,9 @@ const sensitiveDescriptors: SensitiveDescriptor[] = [
   },
   {
     key: "amapWebKey",
-    label: "高德 Web 服务密钥",
-    description: "用于目的地地图与地点检索，仅在渲染地图时使用。",
-    placeholder: "请输入高德 Web 服务密钥"
+    label: "高德 Web JS 密钥（浏览器端）",
+    description: "用于 JSAPI 载入底图；请使用“Web 端（JS API）”类型的 Key，并在高德控制台配置正确的安全域名/Referer。",
+    placeholder: "请输入高德 Web JS Key"
   },
   {
     key: "xfyunApiKey",

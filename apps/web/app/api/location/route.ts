@@ -47,13 +47,29 @@ export async function POST(request: Request) {
     }
 
     const { destination, includeWeather = true } = parsed.data;
-    // Accept several environment variable names for the REST key so CI / env files
-    // that use different names continue to work. Priority:
-    // 1) AMAP_REST_KEY (server-side REST key)
-    // 2) process.env.NEXT_PUBLIC_AMAP_KEY (fallback if only public key provided)
-    // 3) process.env.AMAP_KEY (legacy)
-    // 4) per-user secret stored in `user_secrets` (key names: amapRestKey, amapWebKey)
-    let restKey = process.env.AMAP_REST_KEY ?? process.env.NEXT_PUBLIC_AMAP_KEY ?? process.env.AMAP_KEY ?? null;
+
+    const resolveRestKey = (...candidates: Array<string | undefined | null>) => {
+      for (const candidate of candidates) {
+        if (typeof candidate !== "string") {
+          continue;
+        }
+        const trimmed = candidate.trim();
+        if (trimmed.length > 0) {
+          return trimmed;
+        }
+      }
+      return null;
+    };
+
+    // Accept several environment variable names for the REST/Web 服务 key so CI / env files
+    // that use different naming conventions continue to work. Public (JS) keys must not be reused here,
+    // otherwise the AMap REST API will respond with USERKEY_PLAT_NOMATCH.
+    let restKey = resolveRestKey(
+      process.env.AMAP_REST_KEY,
+      process.env.AMAP_SERVER_KEY,
+      process.env.AMAP_WEB_SERVICE_KEY,
+      process.env.AMAP_KEY
+    );
 
     // If no global REST key, try to use user-scoped secret (requires authenticated session)
     if (!restKey) {
@@ -69,12 +85,16 @@ export async function POST(request: Request) {
           console.warn("[Location] No authenticated user for per-user AMAP key fallback", userError);
         } else {
           // try common secret keys used by settings page
-          const candidateKeys = ["amapRestKey", "amapWebKey", "AMAP_REST_KEY", "NEXT_PUBLIC_AMAP_KEY"];
+          const candidateKeys = ["amapRestKey", "amapWebKey", "AMAP_REST_KEY", "amapServerKey", "amapWebServiceKey"];
           for (const key of candidateKeys) {
             try {
               const val = await getDecryptedUserSecret(user.id, key);
-              if (val) {
-                restKey = val;
+              if (typeof val === "string") {
+                const trimmed = val.trim();
+                if (trimmed.length === 0) {
+                  continue;
+                }
+                restKey = trimmed;
                 break;
               }
             } catch (err) {
@@ -90,7 +110,7 @@ export async function POST(request: Request) {
     if (!restKey) {
       return NextResponse.json({
         error: "AMAP_KEY_MISSING",
-        message: "服务器未配置 AMAP_REST_KEY，无法获取地理信息"
+        message: "服务器未配置高德 Web 服务密钥 (AMAP_REST_KEY)，无法获取地理信息"
       }, { status: 503 });
     }
 
@@ -108,6 +128,18 @@ export async function POST(request: Request) {
     const geoBody = (await geoResponse.json()) as AMapGeocodeResponse;
     const geocode = geoBody.geocodes?.[0];
     if (geoBody.status !== "1" || !geocode?.location) {
+      if (geoBody.info === "USERKEY_PLAT_NOMATCH") {
+        return NextResponse.json({
+          error: "AMAP_REST_KEY_INVALID",
+          message: "当前高德 Web 服务密钥与接口类型不匹配，请确认使用 Web 服务 (REST) 密钥。"
+        }, { status: 502 });
+      }
+      if (geoBody.info === "INVALID_USER_KEY" || geoBody.info === "SERVICE_NOT_EXIST") {
+        return NextResponse.json({
+          error: "AMAP_REST_KEY_INVALID",
+          message: "配置的高德 Web 服务密钥无效或无访问权限，请重新核对。"
+        }, { status: 502 });
+      }
       return NextResponse.json({
         error: "DESTINATION_NOT_FOUND",
         message: `无法解析目的地：${destination}`

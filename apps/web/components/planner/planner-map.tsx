@@ -9,6 +9,13 @@ const FALLBACK_MIN_HEIGHT_PX = 320;
 const ENV_AMAP_KEY = (process.env.NEXT_PUBLIC_AMAP_KEY ?? "").trim();
 const SECURITY_JS_CODE = (process.env.NEXT_PUBLIC_AMAP_SECURITY_JS_CODE ?? "").trim();
 
+function maskSecretPreview(value: string | null | undefined): string | null {
+  const v = (value ?? "").trim();
+  if (!v) return null;
+  if (v.length <= 6) return v;
+  return `${v.slice(0, 3)}${"*".repeat(Math.max(3, v.length - 6))}${v.slice(-3)}`;
+}
+
 type LogLevel = "info" | "warn" | "error";
 
 export interface PlannerMapProps {
@@ -151,10 +158,10 @@ export function PlannerMap({
   const [isMapReady, setIsMapReady] = useState(false);
   const [mapInitError, setMapInitError] = useState<string | null>(null);
 
-  const resolvedAmapKey = useMemo(() => {
+  const { resolvedAmapKey, keySource } = useMemo(() => {
     const trimmedCloud = (amapKey ?? "").trim();
-    if (trimmedCloud) return trimmedCloud;
-    return ENV_AMAP_KEY;
+    if (trimmedCloud) return { resolvedAmapKey: trimmedCloud, keySource: "cloud" as const };
+    return { resolvedAmapKey: ENV_AMAP_KEY, keySource: "env" as const };
   }, [amapKey]);
 
   const sendDebugLog = usePlannerDebugLog();
@@ -424,13 +431,23 @@ export function PlannerMap({
       } catch (initErr) {
         console.error("[PlannerMap] Failed to initialize AMap", initErr);
         cleanupContext();
-        setMapInitError(
-          initErr instanceof Error ? initErr.message : "地图加载失败，请稍后重试。"
-        );
+        const raw = initErr instanceof Error ? initErr.message : String(initErr);
+        let friendly = raw || "地图加载失败，请稍后重试。";
+        if (raw.includes("USERKEY_PLAT_NOMATCH")) {
+          friendly = "检测到高德 Web JS Key 与使用平台不匹配：请确保使用的是“Web 端（JS API）”类型的 Key，并非 Web 服务/Android/iOS Key。";
+        } else if (raw.includes("INVALID_USER_DOMAIN")) {
+          friendly = "当前域名未在高德控制台安全域名/Referer 白名单中。请将实际访问域名（含协议与端口，如 http://localhost:3000）加入白名单。";
+        } else if (raw.includes("INVALID_USER_SCODE")) {
+          friendly = "已开启 JS 安全校验，但未正确注入 securityJsCode 或与控制台不一致。请配置 NEXT_PUBLIC_AMAP_SECURITY_JS_CODE 或在控制台关闭校验后重试。";
+        }
+        setMapInitError(friendly);
         setIsMapReady(false);
         void sendDebugLog("error", "Failed to initialize map", {
-          error: initErr instanceof Error ? initErr.message : String(initErr),
-          attempt
+          error: raw,
+          attempt,
+          keySource,
+          keyPreview: maskSecretPreview(resolvedAmapKey),
+          hasSecurityCode: Boolean(SECURITY_JS_CODE)
         });
       }
     };

@@ -118,6 +118,29 @@ export async function GET() {
     ensureEnvSecret("xfyunApiKey", process.env.XFYUN_API_KEY ?? process.env.NEXT_PUBLIC_XFYUN_API_KEY);
     ensureEnvSecret("xfyunAppSecret", process.env.XFYUN_API_SECRET ?? process.env.IFLYTEK_API_SECRET ?? process.env.NEXT_PUBLIC_XFYUN_API_SECRET ?? process.env.NEXT_PUBLIC_IFLYTEK_API_SECRET);
 
+    // Security safeguard: prevent exposing backend-only REST keys as frontend Web-JS keys.
+    // If a user accidentally saved the REST key into the `amapWebKey` slot (common mistake),
+    // avoid returning the plaintext value to the client so the frontend won't inadvertently load it.
+    try {
+      const restKey = typeof process.env.AMAP_REST_KEY === "string" ? process.env.AMAP_REST_KEY.trim() : "";
+      const envWebKey = typeof process.env.NEXT_PUBLIC_AMAP_KEY === "string" ? process.env.NEXT_PUBLIC_AMAP_KEY.trim() : "";
+      if (restKey) {
+        const entry = secretMap.get("amapWebKey");
+        if (entry && typeof entry.value === "string" && entry.value.trim() === restKey) {
+          console.warn("[Settings] Detected backend AMAP_REST_KEY stored under amapWebKey; clearing plaintext exposure to client");
+          // Replace with a safe response: no plaintext value, but keep a preview if we can (prefer env preview)
+          secretMap.set("amapWebKey", {
+            key: "amapWebKey",
+            value: null,
+            preview: envWebKey ? createSecretPreview(envWebKey) : entry.preview,
+            updatedAt: entry.updatedAt ?? null
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[Settings] Failed to sanitize amapWebKey against REST key", e);
+    }
+
     return NextResponse.json({ secrets: Array.from(secretMap.values()) });
   } catch (error) {
     console.error("[Settings] Unhandled secrets GET error", error);
