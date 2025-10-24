@@ -63,7 +63,7 @@ AI Travel Planner 采用「前后端一体的 Next.js 应用 + Supabase 后端�
 	2. 私密变量使用 Docker BuildKit Secret：`RUN --mount=type=secret,id=runtime_env ... source /run/secrets/runtime_env`；
 	3. 运行镜像时，使用 `docker run --env-file docker/runtime.env` 注入最终环境变量；
 	4. 若在 Kubernetes/Serverless，利用平台 Secret Manager（例如 AWS Secrets Manager、阿里云 KMS）。
-- 构建产物推送至 GHCR，tag 按照语义化版本（例如 `v1.0.3`）。
+- 构建产物推送至 GHCR，tag 按照语义化版本（例如 `v2.2.1`）。
 
 ### CI/CD 流程
 1. **Lint/Test**：GitHub Actions `pnpm lint`、`pnpm --filter web build` 确保质量。

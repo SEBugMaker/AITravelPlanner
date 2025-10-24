@@ -14,12 +14,12 @@
 # 如果仓库为私有，请先登录 GHCR
 echo "YOUR_GH_PAT" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 
-docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
 
 docker run -d --name ai-travel-api -p 3000:3000 \
 	-e NEXT_PUBLIC_SUPABASE_URL="https://your-supabase-url.supabase.co" \
 	-e NEXT_PUBLIC_SUPABASE_ANON_KEY="your_anon_key_here" \
-	ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+	ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
 
 # 然后通过 curl/postman 调用 API
 curl http://localhost:3000/api/health

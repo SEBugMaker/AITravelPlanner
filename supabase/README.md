@@ -23,12 +23,12 @@
 如果你只想在本地快速起一个服务来调试 API，可以使用项目的预构建 Docker 镜像并注入 Supabase 环境变量。根目录 `README.md` 已包含完整示例，简要步骤如下：
 
 ```bash
-docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
 docker run -d --name ai-travel-supabase-test -p 3000:3000 \
 	-e NEXT_PUBLIC_SUPABASE_URL="https://your-supabase-url.supabase.co" \
 	-e NEXT_PUBLIC_SUPABASE_ANON_KEY="your_anon_key_here" \
 	-e SUPABASE_SERVICE_ROLE_KEY="your_service_role_key_here" \
-	ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+	ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
 ```
 
 运行后可使用 `curl http://localhost:3000/api/health` 验证服务是否就绪。

@@ -4,7 +4,7 @@
 
 ## � 快速开始 — 拉取并运行预构建 Docker 镜像
 
-以下步骤可帮助你在本地快速拉取并运行项目的预构建镜像（例如：GHCR 上的 v2.0.2）。这些命令可直接复制到 macOS/zsh 终端执行。
+以下步骤可帮助你在本地快速拉取并运行项目的预构建镜像（例如：GHCR 上的 v2.2.1）。这些命令可直接复制到 macOS/zsh 终端执行。
 
 1) 登录 GitHub Container Registry（如果仓库或包为私有，需要认证）
 
@@ -16,32 +16,82 @@ echo "YOUR_GH_PAT" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-std
 2) 拉取镜像
 
 ```bash
-docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
 ```
 
 3) 以后台容器运行（示例：映射到本地 3000 端口）
 
-如果镜像需要运行时环境变量（强烈建议为 Supabase、LLM、地图与语音服务提供值），请在下面替换占位符：
+镜像通常需要运行时环境变量（Supabase、LLM、地图与语音服务等）。推荐把运行时密钥放到 `docker/runtime.env`（仓库中提供 `docker/runtime.env.example`），然后通过 `--env-file` 注入：
 
 ```bash
-docker run -d --name ai-travel-v2.0.2 -p 3000:3000 \
-   -e NEXT_PUBLIC_SUPABASE_URL="https://your-supabase-url.supabase.co" \
-   -e NEXT_PUBLIC_SUPABASE_ANON_KEY="your_anon_key_here" \
-   -e SUPABASE_SERVICE_ROLE_KEY="your_service_role_key_here" \
-   ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+cp docker/runtime.env.example docker/runtime.env
+# 编辑 docker/runtime.env，填写实际密钥（不要提交到 Git）
+
+docker run -d --name ai-travel-v2.2.1 -p 3000:3000 --env-file docker/runtime.env \
+   ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
 ```
 
-若你已将环境写入文件 `docker/runtime.env`，也可以使用 `--env-file`：
+示例 `docker/runtime.env` 应至少包含（示例占位符）：
+
+```ini
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="your_anon_key"
+SUPABASE_SERVICE_ROLE_KEY="your_service_role_key"
+
+# 高德地图
+# NOTE: `NEXT_PUBLIC_AMAP_KEY` 会在构建时内联到前端（若使用预构建镜像请确保镜像已使用正确的前端 key 构建）
+NEXT_PUBLIC_AMAP_KEY="<your-web-js-key>"
+AMAP_REST_KEY="<your-rest-key>"
+NEXT_PUBLIC_AMAP_SECURITY_JS_CODE="<optional-js-security-code>"
+
+# LLM / 语音等
+LLM_API_KEY="..."
+XFYUN_APP_ID="..."
+XFYUN_API_KEY="..."
+XFYUN_API_SECRET="..."
+```
+
+重要说明：
+
+- `NEXT_PUBLIC_AMAP_KEY` 是前端用的 Web（JS API）Key，会在构建阶段内联到前端 bundle；如果你仅运行已拉取的镜像并在运行时修改 `NEXT_PUBLIC_AMAP_KEY`，不会改变已内联的前端 bundle。若需要更改前端 key，必须在构建阶段传入正确值并重新构建镜像。
+- `AMAP_REST_KEY` 应仅在后端使用，切勿把 REST Key 写入前端公开变量或 Release 描述。
+
+本仓库为 pnpm monorepo，开发时可在源码运行前端（热重载）而无需构建镜像：
 
 ```bash
-docker run -d --name ai-travel-v2.0.2 -p 3000:3000 --env-file docker/runtime.env \
-   ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+# 安装依赖
+pnpm install
+
+# 在开发模式下仅运行 web 应用（本地调试前端）
+pnpm --filter web dev
+```
+
+若要本地构建镜像（在需要把 NEXT_PUBLIC_* 内联到前端时）：
+
+```bash
+# 在根目录使用 Docker 构建镜像并传入前端需要的 build-args
+docker build \
+   --build-arg NEXT_PUBLIC_AMAP_KEY="<your-web-js-key>" \
+   --build-arg NEXT_PUBLIC_AMAP_SECURITY_JS_CODE="<optional-js-security-code>" \
+   -t ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1 .
+
+# 然后推送到 GHCR（需登录）
+docker push ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
+```
+
+如果你在 Apple Silicon 上看到平台不匹配警告，可以在运行时指定平台：
+
+```bash
+docker run -d --platform linux/amd64 --name ai-travel-v2.2.1 -p 3000:3000 \
+   --env-file docker/runtime.env \
+   ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
 ```
 
 4) 查看容器日志
 
 ```bash
-docker logs -f ai-travel-v2.0.2
+docker logs -f ai-travel-v2.2.1
 ```
 
 快速故障排查
@@ -49,8 +99,8 @@ docker logs -f ai-travel-v2.0.2
 - 平台不匹配警告（arm64 vs amd64）：在 Apple Silicon 上可能看到警告，若需要可加 `--platform linux/amd64`（会用到 QEMU，性能较慢）：
 
 ```bash
-docker run -d --platform linux/amd64 --name ai-travel-v2.0.2 -p 3000:3000 \
-   ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.0.2
+docker run -d --platform linux/amd64 --name ai-travel-v2.2.1 -p 3000:3000 \
+   ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
 ```
 
 - 容器启动但提示 Supabase Key 缺失：按上面示例注入 `NEXT_PUBLIC_SUPABASE_URL` 与 `NEXT_PUBLIC_SUPABASE_ANON_KEY` 环境变量。
@@ -230,8 +280,8 @@ pnpm --filter web dev
 cp docker/runtime.env.example docker/runtime.env
 # 修改 docker/runtime.env，填入 Supabase、LLM、AMap、讯飞等密钥
 
-docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v1.0.3
-docker run --env-file docker/runtime.env -p 3000:3000 ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v1.0.3
+docker pull ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
+docker run --env-file docker/runtime.env -p 3000:3000 ghcr.io/sebugmaker/aitravelplanner/ai-travel-planner:v2.2.1
 ```
 
 如需本地构建，可显式指定构建时的公开环境变量：
@@ -273,3 +323,9 @@ docker build \
 
 ## 📜 License
 本项目采用 [MIT License](./LICENSE)。
+
+## GitHub 与贡献
+
+GitHub 仓库： https://github.com/SEBugMaker/AITravelPlanner
+
+欢迎在仓库中提交 Issue、PR 或在 Releases 下留下反馈。贡献前请阅读 `CONTRIBUTING.md`，其中包含分支、提交信息规范与 PR 模板说明。
